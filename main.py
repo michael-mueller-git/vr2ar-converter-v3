@@ -352,6 +352,7 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
     os.makedirs("process/debug", exist_ok=True)
     reverse_track = False
 
+    WORKER_STATUS = "Process Video..."
     while ffmpeg.isOpen():
         img = ffmpeg.read()
         if img is None:
@@ -401,6 +402,9 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
             output_prob_R = processor2.step(imgRV)
         else:
             print("Warning: Start frame not found yet")
+            cv2.imwrite('process/frames/' + str(current_frame).zfill(6) + ".png", img_scaled)
+            combined_mask = np.zeros((img_scaled.shape[0], img_scaled.shape[1]), dtype=np.uint8)
+            cv2.imwrite('process/masks/' + str(current_frame).zfill(6) + ".png", combined_mask)
             continue
 
         WORKER_STATUS = f"Create Mask {current_frame}/{video_info.length}"
@@ -580,10 +584,10 @@ def background_worker():
                 start_job = "True" in str(requests.get(surplus_url, verify=False).json())
             except Exception as ex:
                 start_job = False
-                print(ex)
+                # print(ex)
 
             if not start_job:
-                WORKER_STATUS = "Wait for [v] surplus"
+                WORKER_STATUS = "Wait for surplus"
                 time.sleep(30)
                 continue
 
@@ -644,7 +648,7 @@ def add_job(video, projection, crf, erode, forceInitMask, reverseTracking):
         gr.Warning("Could not add Job: Video not found", duration=5)
         return tuple(gr.skip() for _ in range(RETURN_VALUES))
 
-    if not all(os.path.exists(os.path.join(x, '0000.png')) for x in ["masksL", "masksR"]):
+    if not reverseTracking and not all(os.path.exists(os.path.join(x, '0000.png')) for x in ["masksL", "masksR"]):
         gr.Warning("Could not add Job: Mask for first frame does not exists", duration=5)
         return tuple(gr.skip() for _ in range(RETURN_VALUES))
 
@@ -828,7 +832,7 @@ def get_mask(frameL, frameR, maskLPrompt, maskRPrompt, maskLThreshold, maskRThre
             invNegativeMaskL = 255 - (negativeImgLMask[0].squeeze().cpu().numpy() * 255).astype(np.uint8)
             maskL = np.bitwise_and(maskL, invNegativeMaskL)
 
-        maskL = Image.fromarray(maskL, mode='L')
+        maskL = Image.fromarray(maskL).convert('L')
 
         previewL = Image.composite(
             Image.new("RGB", maskL.size, "blue"),
@@ -849,7 +853,7 @@ def get_mask(frameL, frameR, maskLPrompt, maskRPrompt, maskLThreshold, maskRThre
             invNegativeMaskR = 255 - (negativeImgRMask[0].squeeze().cpu().numpy() * 255).astype(np.uint8)
             maskR = np.bitwise_and(maskR, invNegativeMaskR)
 
-        maskR = Image.fromarray(maskR, mode='L')
+        maskR = Image.fromarray(maskR).convert('L')
         previewR = Image.composite(
                 Image.new("RGB", maskR.size, "blue"),
                 Image.fromarray(frameR).convert("RGBA"),
@@ -884,7 +888,7 @@ def get_mask2():
 
     if len(pointsL) != 0:
         (_, imgLMask) = sam2.predict(frameL, pointsL)
-        maskL = Image.fromarray((imgLMask * 255).astype(np.uint8), mode='L')
+        maskL = Image.fromarray((imgLMask * 255).astype(np.uint8)).convert('L')
         previewL = Image.composite(
             Image.new("RGB", maskL.size, "blue"),
             Image.fromarray(frameL).convert("RGBA"),
@@ -898,7 +902,7 @@ def get_mask2():
     if len(pointsR) != 0:
         (_, imgRMask) = sam2.predict(frameR, pointsR)
     
-        maskR = Image.fromarray((imgRMask * 255).astype(np.uint8), mode='L')
+        maskR = Image.fromarray((imgRMask * 255).astype(np.uint8)).convert('L')
 
         previewR = Image.composite(
             Image.new("RGB", maskR.size, "blue"),
@@ -1063,7 +1067,7 @@ with gr.Blocks() as demo:
         gr.Markdown("## Stage 2 - Extract First Frame")
         frame_button = gr.Button("Extract Projection Frame")
         gr.Markdown("### Frames")
-        gr.Markdown("Important: You need to provide/generate a mask for 0 sec, Masks for the other frames are optional")
+        gr.Markdown("Important: Without reverse tracking you need to provide/generate a mask for 0 sec, Masks for the other frames are optional")
         gallery = gr.Gallery(label="Extracted Frames", show_label=True, columns=4, object_fit="contain")
         select_button = gr.Button("Load Slected Projection Frame")
         with gr.Row():
@@ -1331,5 +1335,5 @@ if __name__ == "__main__":
     
     worker_thread = threading.Thread(target=background_worker, daemon=True)
     worker_thread.start()
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, debug=True)
     print("exit")
