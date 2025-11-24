@@ -386,8 +386,10 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
 
         if frame_match:
             print("match at", current_frame)
-            imgLMask = fix_mask2(masks[maskIdx]['maskL'])
-            imgRMask = fix_mask2(masks[maskIdx]['maskR'])
+            mL = masks[maskIdx]['maskL']
+            mR = masks[maskIdx]['maskR']
+            imgLMask = fix_mask2(mL)
+            imgRMask = fix_mask2(mR)
             maskIdx += 1
             reverse_track = True
 
@@ -397,6 +399,20 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
             for _ in range(WARMUP):
                 output_prob_L = processor1.step(imgLV, first_frame_pred=maskIdx==1)
                 output_prob_R = processor2.step(imgRV, first_frame_pred=maskIdx==1)
+
+            if MASK_DEBUG:
+                print("debug stuff")
+                combined_mask = cv2.hconcat([np.array(mL), np.array(mR)])
+                # cv2.imwrite('process/debug/match_mask_' + str(current_frame).zfill(6) + ".png", combined_mask)
+                # cv2.imwrite('process/debug/match_image_' + str(current_frame).zfill(6) + ".png", img_scaled)
+                mask = Image.fromarray(combined_mask).convert("L")
+                preview = Image.composite(
+                    Image.new("RGB", (combined_mask.shape[1], combined_mask.shape[0]), "blue"),
+                    Image.fromarray(img_scaled).convert("RGBA"),
+                    mask.point(lambda p: 100 if p > 1 else 0)
+                )
+                preview.save('process/debug/match_' + str(current_frame).zfill(6) + ".png")
+
         elif maskIdx > 0:
             output_prob_L = processor1.step(imgLV)
             output_prob_R = processor2.step(imgRV)
@@ -425,7 +441,14 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
         
         cv2.imwrite('process/masks/' + str(current_frame).zfill(6) + ".png", combined_mask)
         if MASK_DEBUG:
-            cv2.imwrite('process/debug/' + str(current_frame).zfill(6) + ".png", combined_mask)
+            # cv2.imwrite('process/debug/' + str(current_frame).zfill(6) + ".png", combined_mask)
+            mask = Image.fromarray(combined_mask).convert("L")
+            preview = Image.composite(
+                Image.new("RGB", (combined_mask.shape[1], combined_mask.shape[0]), "blue"), 
+                Image.fromarray(img_scaled).convert("RGBA"),
+                mask.point(lambda p: 100 if p > 1 else 0)
+            )
+            preview.save('process/debug/forward_' + str(current_frame).zfill(6) + ".png")
 
         if reverse_track:
             imgLV_end = imgLV
@@ -461,14 +484,29 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
                 maskA = cv2.imread(frame_file.replace('frames', 'masks'), cv2.IMREAD_UNCHANGED)
                 
                 if MASK_DEBUG:
-                    cv2.imwrite(frame_file.replace('frames', 'debug').replace('.png', '_rev.png'), combined_mask)
+                    # cv2.imwrite(frame_file.replace('frames', 'debug').replace('.png', '_rev.png'), combined_mask)
+                    mask = Image.fromarray(combined_mask).convert("L")
+                    preview = Image.composite(
+                        Image.new("RGB", (combined_mask.shape[1], combined_mask.shape[0]), "blue"),
+                        Image.fromarray(img_scaled).convert("RGBA"),
+                        mask.point(lambda p: 100 if p > 1 else 0)
+                    )
+                    preview.save(frame_file.replace('frames', 'debug').replace('.png', '_rev.png'))
+
                 
                 # using avg or other merge gives much worse reults at edges
                 mergedA = np.bitwise_or(np.array(maskA), np.array(combined_mask))
 
                 cv2.imwrite(frame_file.replace('frames', 'masks'), mergedA)
                 if MASK_DEBUG:
-                    cv2.imwrite(frame_file.replace('frames', 'debug').replace('.png', '_res.png'), mergedA)
+                    # cv2.imwrite(frame_file.replace('frames', 'debug').replace('.png', '_res.png'), mergedA)
+                    mask = Image.fromarray(mergedA).convert("L")
+                    preview = Image.composite(
+                        Image.new("RGB", (mergedA.shape[1], mergedA.shape[0]), "blue"),
+                        Image.fromarray(img_scaled).convert("RGBA"),
+                        mask.point(lambda p: 100 if p > 1 else 0)
+                    )
+                    preview.save(frame_file.replace('frames', 'debug').replace('.png', '_res.png'))
 
             print("reverse tracking of", subprocess_len, "completed")
             # set model state to forware tracking again
@@ -500,68 +538,142 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
 
     WORKER_STATUS = f"Create Mask Video..."
     print("create Video", result_name)
-    scale = video_info.height / mask_h * 0.4
+    if False:
+        maskIdx = 0
+        _, mask_h = masks[maskIdx]['maskL'].size
 
-    fc2 = f'"[1]scale=iw*{scale}:-1[alpha];[2][alpha]scale2ref[mask][alpha];[alpha][mask]alphamerge,split=2[masked_alpha1][masked_alpha2]; [masked_alpha1]crop=iw/2:ih:0:0,split=2[masked_alpha_l1][masked_alpha_l2]; [masked_alpha2]crop=iw/2:ih:iw/2:0,split=4[masked_alpha_r1][masked_alpha_r2][masked_alpha_r3][masked_alpha_r4]; [0][masked_alpha_l1]overlay=W*0.5-w*0.5:-0.5*h[out_lt];[out_lt][masked_alpha_l2]overlay=W*0.5-w*0.5:H-0.5*h[out_tb]; [out_tb][masked_alpha_r1]overlay=0-w*0.5:-0.5*h[out_l_lt];[out_l_lt][masked_alpha_r2]overlay=0-w*0.5:H-0.5*h[out_tb_ltb]; [out_tb_ltb][masked_alpha_r3]overlay=W-w*0.5:-0.5*h[out_r_lt];[out_r_lt][masked_alpha_r4]overlay=W-w*0.5:H-0.5*h"'
+        original_filename = os.path.basename(video)
+        file_name, file_extension = os.path.splitext(original_filename)
+        
+        video_info = FFmpegStream.get_video_info(video)
+        
+        reader_config = {
+            "parameter": {
+                "width": video_info.width,
+                "height": video_info.height,
+            }
+        }
+        
+        if "eq" == projection:
+            reader_config["filter_complex"] = "[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack[v]"
+            projection_out = "fisheye180"
+        else:
+            projection_out = projection
 
 
-    cmd = [
-        "ffmpeg",
-        '-hide_banner',
-        '-loglevel', 'warning',
-        '-thread_queue_size', '64',
-        '-ss', FFmpegStream.frame_to_timestamp(0, video_info.fps),
-        '-hwaccel', 'auto',
-        '-i', "\""+str(video)+"\"",
-        '-f', 'image2pipe',
-        '-pix_fmt', 'bgr24',
-        '-vsync', 'passthrough',
-        '-vcodec', 'rawvideo',
-        '-an',
-        '-sn'
-    ]
+        WORKER_STATUS = f"Combine Masks with Video..."
 
-    if "eq" == projection:
-        cmd += [
-            "-filter_complex", "\"[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack[v]\"",
-            "-map", "[v]"
+        current_frame = 0
+
+        ffmpeg = FFmpegStream(
+            video_path = video,
+            config = reader_config,
+            skip_frames = 0
+        )
+        result_tmp_name = file_name + "_" + str(projection_out).upper() + "_alpha_tmp" + file_extension 
+        result_name = file_name + "_" + str(projection_out).upper() + "_alpha" + file_extension 
+        writer = ArVideoWriter(result_tmp_name, video_info.fps, crf)
+        while ffmpeg.isOpen():
+            img = ffmpeg.read()
+            if img is None:
+                break
+            current_frame += 1
+            mask_filename = 'process/masks/' + str(current_frame).zfill(6) + ".png"
+            if not os.path.exists(mask_filename):
+                print("Mask for", current_frame, "doesn not exists")
+                continue
+            maskA = cv2.imread(mask_filename, cv2.IMREAD_UNCHANGED)
+            writer.add_frame(img, maskA)
+
+        ffmpeg.stop()
+        writer.finalize()
+
+        total_frames = current_frame
+        while not writer.is_finished():
+            WORKER_STATUS = f"Encode Frame {writer.get_current_frame_number()}/{total_frames}"
+            time.sleep(0.5)
+
+        gc.collect()
+
+        WORKER_STATUS = f"Combine Video and Audio..." 
+        subprocess.run([
+            "ffmpeg",
+            "-hide_banner", 
+            "-loglevel", "warning",
+            "-i", result_tmp_name,
+            "-i", video,
+            "-c", "copy",
+            "-map", "0:v:0",
+            "-map", "1:a:0?",
+            result_name
+        ])
+
+        os.remove(result_tmp_name)
+
+        WORKER_STATUS = f"Convertion completed" 
+    else:
+        scale = video_info.height / mask_h * 0.4
+
+        fc2 = f'"[1]scale=iw*{scale}:-1[alpha];[2][alpha]scale2ref[mask][alpha];[alpha][mask]alphamerge,split=2[masked_alpha1][masked_alpha2]; [masked_alpha1]crop=iw/2:ih:0:0,split=2[masked_alpha_l1][masked_alpha_l2]; [masked_alpha2]crop=iw/2:ih:iw/2:0,split=4[masked_alpha_r1][masked_alpha_r2][masked_alpha_r3][masked_alpha_r4]; [0][masked_alpha_l1]overlay=W*0.5-w*0.5:-0.5*h[out_lt];[out_lt][masked_alpha_l2]overlay=W*0.5-w*0.5:H-0.5*h[out_tb]; [out_tb][masked_alpha_r1]overlay=0-w*0.5:-0.5*h[out_l_lt];[out_l_lt][masked_alpha_r2]overlay=0-w*0.5:H-0.5*h[out_tb_ltb]; [out_tb_ltb][masked_alpha_r3]overlay=W-w*0.5:-0.5*h[out_r_lt];[out_r_lt][masked_alpha_r4]overlay=W-w*0.5:H-0.5*h"'
+
+
+        cmd = [
+            "ffmpeg",
+            '-hide_banner',
+            '-loglevel', 'warning',
+            '-thread_queue_size', '64',
+            '-ss', FFmpegStream.frame_to_timestamp(0, video_info.fps),
+            '-hwaccel', 'auto',
+            '-i', "\""+str(video)+"\"",
+            '-f', 'image2pipe',
+            '-pix_fmt', 'bgr24',
+            '-vsync', 'passthrough',
+            '-vcodec', 'rawvideo',
+            '-an',
+            '-sn'
         ]
 
-    cmd += [
-        '-',
-        '|',
-        "ffmpeg",
-        '-y',
-        '-hide_banner',
-        '-loglevel', 'error',
-        '-f', 'rawvideo',
-        '-vcodec', 'rawvideo',
-        '-pix_fmt', 'bgr24',
-        '-s', f'{video_info.width}x{video_info.height}',
-        '-r', str(video_info.fps),
-        '-thread_queue_size', '64',
-        '-i', 'pipe:0',
-        '-r', str(video_info.fps),
-        '-thread_queue_size', '64',
-        "-i", "\"process/masks/%06d.png\"",
-        "-i", "mask.png",
-        '-r', str(video_info.fps),
-        '-i', "\""+str(video)+"\"",
-        "-filter_complex",
-        fc2,
-        "-c:v", "libx265", 
-        "-crf", str(crf),
-        "-preset", "veryfast",
-        "-map", "\"3:a:?\"",
-        "-c:a", "copy",
-        "\""+result_name+"\"",
-        "-y"
-    ]
+        if "eq" == projection:
+            cmd += [
+                "-filter_complex", "\"[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack[v]\"",
+                "-map", "[v]"
+            ]
 
-    if DEBUG:
-        print(cmd)
+        cmd += [
+            '-',
+            '|',
+            "ffmpeg",
+            '-y',
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-f', 'rawvideo',
+            '-vcodec', 'rawvideo',
+            '-pix_fmt', 'bgr24',
+            '-s', f'{video_info.width}x{video_info.height}',
+            '-r', str(video_info.fps),
+            '-thread_queue_size', '64',
+            '-i', 'pipe:0',
+            '-r', str(video_info.fps),
+            '-thread_queue_size', '64',
+            "-i", "\"process/masks/%06d.png\"",
+            "-i", "mask.png",
+            '-r', str(video_info.fps),
+            '-i', "\""+str(video)+"\"",
+            "-filter_complex",
+            fc2,
+            "-c:v", "libx265", 
+            "-crf", str(crf),
+            "-preset", "veryfast",
+            "-map", "\"3:a:?\"",
+            "-c:a", "copy",
+            "\""+result_name+"\"",
+            "-y"
+        ]
 
-    subprocess.run(' '.join(cmd), shell=True)
+        if DEBUG:
+            print(cmd)
+
+        subprocess.run(' '.join(cmd), shell=True)
 
     shutil.rmtree("process/masks")
 
