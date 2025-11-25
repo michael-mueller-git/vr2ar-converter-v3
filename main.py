@@ -52,11 +52,11 @@ WORKER_STATUS = "Idle"
 MASK_SIZE = 1440
 SECONDS = 10
 WARMUP = 4
-JOB_VERSION = 3
-SSIM_THRESHOLD = 0.983
+JOB_VERSION = 4
+SSIM_THRESHOLD = float(os.environ.get('SSIM_THRESHOLD', "0.983"))
 DEBUG = False
-MASK_DEBUG = False
-SURPLUS_IGNORE = False
+MASK_DEBUG = bool(os.environ.get('MASK_DEBUG', "False"))
+SURPLUS_IGNORE =  bool(os.environ.get('SURPLUS_IGNORE', "True"))
 SCHEDULE = bool(os.environ.get('EXECUTE_SCHEDULER_ON_START', "True"))
 
 def gen_dilate(alpha, min_kernel_size, max_kernel_size): 
@@ -110,172 +110,9 @@ def fix_mask2(mask):
 
     return mask
 
-@torch.no_grad()
-def process(video, projection, masks, crf = 16, erode = False, force_init_mask=False):
-    global WORKER_STATUS
-
-    maskIdx = 0
-    _, mask_h = masks[maskIdx]['maskL'].size
-
-    original_filename = os.path.basename(video)
-    file_name, file_extension = os.path.splitext(original_filename)
-    
-    video_info = FFmpegStream.get_video_info(video)
-    
-    reader_config = {
-        "parameter": {
-            "width": video_info.width,
-            "height": video_info.height,
-        }
-    }
-    
-    if "eq" == projection:
-        reader_config["filter_complex"] = "[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack[v]"
-        projection = "fisheye180"
-
-    WORKER_STATUS = f"Load Models to create Masks"
-
-    current_frame = 0
-    objects = [1]
-
-    has_cuda = torch.torch.cuda.is_available()
-
-    ffmpeg = FFmpegStream(
-        video_path = video,
-        config = reader_config,
-        skip_frames = 0
-    )
-
-    result_tmp_name = file_name + "_" + str(projection).upper() + "_alpha_tmp" + file_extension 
-    result_name = file_name + "_" + str(projection).upper() + "_alpha" + file_extension 
-    writer = ArVideoWriter(result_tmp_name, video_info.fps, crf)
-
-    matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
-    if torch.torch.cuda.is_available():
-        matanyone1 = matanyone1.cuda()
-    matanyone1 = matanyone1.eval()
-    processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg)
-
-    matanyone2 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
-    if torch.torch.cuda.is_available():
-        matanyone2 = matanyone2.cuda()
-    matanyone2 = matanyone2.eval()
-    processor2 = InferenceCore(matanyone2, cfg=matanyone2.cfg)
-
-    for i in range(len(masks)):
-        imgLV = prepare_frame(masks[i]['frameL'], has_cuda)
-        imgRV = prepare_frame(masks[i]['frameR'], has_cuda)
-        imgLMask = fix_mask2(masks[i]['maskL'])
-        imgRMask = fix_mask2(masks[i]['maskR'])
-        _ = processor1.step(imgLV, imgLMask, objects=objects, force_permanent=True)
-        _ = processor2.step(imgRV, imgRMask, objects=objects, force_permanent=True)
-
-    while ffmpeg.isOpen():
-        img = ffmpeg.read()
-        if img is None:
-            break
-        current_frame += 1
-
-        img_scaled = cv2.resize(img, (2*mask_h, mask_h))
-
-        _, width = img_scaled.shape[:2]
-        imgL = img_scaled[:, :int(width/2)]
-        imgR = img_scaled[:, int(width/2):]
-
-        imgLV = prepare_frame(imgL, has_cuda)
-        imgRV = prepare_frame(imgR, has_cuda)
-
-        frame_match = False
-        if force_init_mask and current_frame == 1:
-            frame_match = True
-
-        if maskIdx < len(masks):
-            if ssim(masks[maskIdx]['frameLGray'], cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY)) > SSIM_THRESHOLD:
-                if ssim(masks[maskIdx]['frameRGray'], cv2.cvtColor(imgR, cv2.COLOR_BGR2GRAY)) > SSIM_THRESHOLD:
-                    frame_match = True
-
-        if frame_match:
-            print("match at", current_frame)
-            imgLMask = fix_mask2(masks[maskIdx]['maskL'])
-            imgRMask = fix_mask2(masks[maskIdx]['maskR'])
-            maskIdx += 1
-
-            output_prob_L = processor1.step(imgLV, imgLMask, objects=objects)
-            output_prob_R = processor2.step(imgRV, imgRMask, objects=objects)
-            
-            for _ in range(WARMUP):
-                output_prob_L = processor1.step(imgLV, first_frame_pred=maskIdx==1)
-                output_prob_R = processor2.step(imgRV, first_frame_pred=maskIdx==1)
-        elif maskIdx > 0:
-            output_prob_L = processor1.step(imgLV)
-            output_prob_R = processor2.step(imgRV)
-        else:
-            print("Warning: Start frame not found yet")
-            continue
-
-        WORKER_STATUS = f"Create Mask {current_frame}/{video_info.length}"
-
-        mask_output_L = processor1.output_prob_to_mask(output_prob_L)
-        mask_output_R = processor2.output_prob_to_mask(output_prob_R)
-
-        mask_output_L_pha = mask_output_L.unsqueeze(2).cpu().detach().numpy()
-        mask_output_R_pha = mask_output_R.unsqueeze(2).cpu().detach().numpy()
-
-        mask_output_L_pha = (mask_output_L_pha*255).astype(np.uint8)
-        mask_output_R_pha = (mask_output_R_pha*255).astype(np.uint8)
-
-        if erode:
-            mask_output_L_pha = cv2.erode(mask_output_L_pha, (3,3), iterations=1)
-            mask_output_R_pha = cv2.erode(mask_output_R_pha, (3,3), iterations=1)
-
-        combined_mask = cv2.hconcat([mask_output_L_pha, mask_output_R_pha])
-        
-        writer.add_frame(img, combined_mask)
-
-        gc.collect()
-
-    if maskIdx < len(masks):
-        print("ERROR: not all frames found in video!")
-
-    del processor1
-    del processor2
-    del matanyone1
-    del matanyone2
-
-    if torch.torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    ffmpeg.stop()
-    writer.finalize()
-
-    total_frames = current_frame
-    while not writer.is_finished():
-        WORKER_STATUS = f"Encode Frame {writer.get_current_frame_number()}/{total_frames}"
-        time.sleep(0.5)
-
-    gc.collect()
-
-    WORKER_STATUS = f"Combine Video and Audio..." 
-    subprocess.run([
-        "ffmpeg",
-        "-hide_banner", 
-        "-loglevel", "warning",
-        "-i", result_tmp_name,
-        "-i", video,
-        "-c", "copy",
-        "-map", "0:v:0",
-        "-map", "1:a:0?",
-        result_name
-    ])
-
-    os.remove(result_tmp_name)
-
-    WORKER_STATUS = f"Convertion completed" 
-    return result_name
-
 
 @torch.no_grad()
-def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = False, force_init_mask=False):
+def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = False, force_init_mask=False, output_height=0, keepEq=False):
     global WORKER_STATUS
 
     maskIdx = 0
@@ -294,7 +131,7 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
     }
     
     output_w = 2*mask_w
-    if "eq" == projection:
+    if not keepEq and "eq" == projection:
         reader_config["filter_complex"] = f"[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack,scale={output_w}:{mask_h}[v]"
         projection_out = "fisheye180"
     else:
@@ -401,10 +238,7 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
                 output_prob_R = processor2.step(imgRV, first_frame_pred=maskIdx==1)
 
             if MASK_DEBUG:
-                print("debug stuff")
                 combined_mask = cv2.hconcat([np.array(mL), np.array(mR)])
-                # cv2.imwrite('process/debug/match_mask_' + str(current_frame).zfill(6) + ".png", combined_mask)
-                # cv2.imwrite('process/debug/match_image_' + str(current_frame).zfill(6) + ".png", img_scaled)
                 mask = Image.fromarray(combined_mask).convert("L")
                 preview = Image.composite(
                     Image.new("RGB", (combined_mask.shape[1], combined_mask.shape[0]), "blue"),
@@ -441,7 +275,6 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
         
         cv2.imwrite('process/masks/' + str(current_frame).zfill(6) + ".png", combined_mask)
         if MASK_DEBUG:
-            # cv2.imwrite('process/debug/' + str(current_frame).zfill(6) + ".png", combined_mask)
             mask = Image.fromarray(combined_mask).convert("L")
             preview = Image.composite(
                 Image.new("RGB", (combined_mask.shape[1], combined_mask.shape[0]), "blue"), 
@@ -499,7 +332,6 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
 
                 cv2.imwrite(frame_file.replace('frames', 'masks'), mergedA)
                 if MASK_DEBUG:
-                    # cv2.imwrite(frame_file.replace('frames', 'debug').replace('.png', '_res.png'), mergedA)
                     mask = Image.fromarray(mergedA).convert("L")
                     preview = Image.composite(
                         Image.new("RGB", (mergedA.shape[1], mergedA.shape[0]), "blue"),
@@ -538,142 +370,82 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
 
     WORKER_STATUS = f"Create Mask Video..."
     print("create Video", result_name)
-    if False:
-        maskIdx = 0
-        _, mask_h = masks[maskIdx]['maskL'].size
-
-        original_filename = os.path.basename(video)
-        file_name, file_extension = os.path.splitext(original_filename)
-        
-        video_info = FFmpegStream.get_video_info(video)
-        
-        reader_config = {
-            "parameter": {
-                "width": video_info.width,
-                "height": video_info.height,
-            }
-        }
-        
-        if "eq" == projection:
-            reader_config["filter_complex"] = "[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack[v]"
-            projection_out = "fisheye180"
-        else:
-            projection_out = projection
 
 
-        WORKER_STATUS = f"Combine Masks with Video..."
+    out_resolution = f'{video_info.width}:{video_info.height}'
+    scale = video_info.height / mask_h * 0.4
+    if output_height > 0:
+        out_w = int(output_height * 2)
+        out_h = int(output_height)
+        scale = out_h / mask_h * 0.4
+        out_resolution = f'{out_w}:{out_h}'
+        print("use custom output resolution", out_resolution)
 
-        current_frame = 0
-
-        ffmpeg = FFmpegStream(
-            video_path = video,
-            config = reader_config,
-            skip_frames = 0
-        )
-        result_tmp_name = file_name + "_" + str(projection_out).upper() + "_alpha_tmp" + file_extension 
-        result_name = file_name + "_" + str(projection_out).upper() + "_alpha" + file_extension 
-        writer = ArVideoWriter(result_tmp_name, video_info.fps, crf)
-        while ffmpeg.isOpen():
-            img = ffmpeg.read()
-            if img is None:
-                break
-            current_frame += 1
-            mask_filename = 'process/masks/' + str(current_frame).zfill(6) + ".png"
-            if not os.path.exists(mask_filename):
-                print("Mask for", current_frame, "doesn not exists")
-                continue
-            maskA = cv2.imread(mask_filename, cv2.IMREAD_UNCHANGED)
-            writer.add_frame(img, maskA)
-
-        ffmpeg.stop()
-        writer.finalize()
-
-        total_frames = current_frame
-        while not writer.is_finished():
-            WORKER_STATUS = f"Encode Frame {writer.get_current_frame_number()}/{total_frames}"
-            time.sleep(0.5)
-
-        gc.collect()
-
-        WORKER_STATUS = f"Combine Video and Audio..." 
-        subprocess.run([
-            "ffmpeg",
-            "-hide_banner", 
-            "-loglevel", "warning",
-            "-i", result_tmp_name,
-            "-i", video,
-            "-c", "copy",
-            "-map", "0:v:0",
-            "-map", "1:a:0?",
-            result_name
-        ])
-
-        os.remove(result_tmp_name)
-
-        WORKER_STATUS = f"Convertion completed" 
-    else:
-        scale = video_info.height / mask_h * 0.4
-
-        fc2 = f'"[1]scale=iw*{scale}:-1[alpha];[2][alpha]scale2ref[mask][alpha];[alpha][mask]alphamerge,split=2[masked_alpha1][masked_alpha2]; [masked_alpha1]crop=iw/2:ih:0:0,split=2[masked_alpha_l1][masked_alpha_l2]; [masked_alpha2]crop=iw/2:ih:iw/2:0,split=4[masked_alpha_r1][masked_alpha_r2][masked_alpha_r3][masked_alpha_r4]; [0][masked_alpha_l1]overlay=W*0.5-w*0.5:-0.5*h[out_lt];[out_lt][masked_alpha_l2]overlay=W*0.5-w*0.5:H-0.5*h[out_tb]; [out_tb][masked_alpha_r1]overlay=0-w*0.5:-0.5*h[out_l_lt];[out_l_lt][masked_alpha_r2]overlay=0-w*0.5:H-0.5*h[out_tb_ltb]; [out_tb_ltb][masked_alpha_r3]overlay=W-w*0.5:-0.5*h[out_r_lt];[out_r_lt][masked_alpha_r4]overlay=W-w*0.5:H-0.5*h"'
+    fc2 = f'"[1]scale=iw*{scale}:-1[alpha];[2][alpha]scale2ref[mask][alpha];[alpha][mask]alphamerge,split=2[masked_alpha1][masked_alpha2]; [masked_alpha1]crop=iw/2:ih:0:0,split=2[masked_alpha_l1][masked_alpha_l2]; [masked_alpha2]crop=iw/2:ih:iw/2:0,split=4[masked_alpha_r1][masked_alpha_r2][masked_alpha_r3][masked_alpha_r4]; [0][masked_alpha_l1]overlay=W*0.5-w*0.5:-0.5*h[out_lt];[out_lt][masked_alpha_l2]overlay=W*0.5-w*0.5:H-0.5*h[out_tb]; [out_tb][masked_alpha_r1]overlay=0-w*0.5:-0.5*h[out_l_lt];[out_l_lt][masked_alpha_r2]overlay=0-w*0.5:H-0.5*h[out_tb_ltb]; [out_tb_ltb][masked_alpha_r3]overlay=W-w*0.5:-0.5*h[out_r_lt];[out_r_lt][masked_alpha_r4]overlay=W-w*0.5:H-0.5*h"'
 
 
-        cmd = [
-            "ffmpeg",
-            '-hide_banner',
-            '-loglevel', 'warning',
-            '-thread_queue_size', '64',
-            '-ss', FFmpegStream.frame_to_timestamp(0, video_info.fps),
-            '-hwaccel', 'auto',
-            '-i', "\""+str(video)+"\"",
-            '-f', 'image2pipe',
-            '-pix_fmt', 'bgr24',
-            '-vsync', 'passthrough',
-            '-vcodec', 'rawvideo',
-            '-an',
-            '-sn'
-        ]
+    cmd = [
+        "ffmpeg",
+        '-hide_banner',
+        '-loglevel', 'warning',
+        '-thread_queue_size', '64',
+        '-ss', FFmpegStream.frame_to_timestamp(0, video_info.fps),
+        '-hwaccel', 'auto',
+        '-i', "\""+str(video)+"\"",
+        '-f', 'image2pipe',
+        '-pix_fmt', 'bgr24',
+        '-vsync', 'passthrough',
+        '-vcodec', 'rawvideo',
+        '-an',
+        '-sn'
+    ]
 
-        if "eq" == projection:
-            cmd += [
-                "-filter_complex", "\"[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack[v]\"",
-                "-map", "[v]"
-            ]
-
+    if not keepEq and "eq" == projection:
         cmd += [
-            '-',
-            '|',
-            "ffmpeg",
-            '-y',
-            '-hide_banner',
-            '-loglevel', 'error',
-            '-f', 'rawvideo',
-            '-vcodec', 'rawvideo',
-            '-pix_fmt', 'bgr24',
-            '-s', f'{video_info.width}x{video_info.height}',
-            '-r', str(video_info.fps),
-            '-thread_queue_size', '64',
-            '-i', 'pipe:0',
-            '-r', str(video_info.fps),
-            '-thread_queue_size', '64',
-            "-i", "\"process/masks/%06d.png\"",
-            "-i", "mask.png",
-            '-r', str(video_info.fps),
-            '-i', "\""+str(video)+"\"",
-            "-filter_complex",
-            fc2,
-            "-c:v", "libx265", 
-            "-crf", str(crf),
-            "-preset", "veryfast",
-            "-map", "\"3:a:?\"",
-            "-c:a", "copy",
-            "\""+result_name+"\"",
-            "-y"
+            "-filter_complex", f"\"[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack,scale={out_resolution}[v]\"",
+            "-map", "[v]"
+        ]
+    else:
+        cmd += [
+            "-filter_complex", f"\"[0:v]scale={out_resolution}[v]\"",
+            "-map", "[v]"
         ]
 
-        if DEBUG:
-            print(cmd)
+    cmd += [
+        '-',
+        '|',
+        "ffmpeg",
+        '-y',
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-f', 'rawvideo',
+        '-vcodec', 'rawvideo',
+        '-pix_fmt', 'bgr24',
+        '-s', out_resolution,
+        '-r', str(video_info.fps),
+        '-thread_queue_size', '64',
+        '-i', 'pipe:0',
+        '-r', str(video_info.fps),
+        '-thread_queue_size', '64',
+        "-i", "\"process/masks/%06d.png\"",
+        "-i", "mask.png",
+        '-r', str(video_info.fps),
+        '-i', "\""+str(video)+"\"",
+        "-filter_complex",
+        fc2,
+        "-c:v", "libx265", 
+        "-crf", str(crf),
+        "-preset", "veryfast",
+        "-map", "\"3:a:?\"",
+        "-c:a", "copy",
+        "\""+result_name+"\"",
+        "-y"
+    ]
 
-        subprocess.run(' '.join(cmd), shell=True)
+    if DEBUG:
+        print(cmd)
+
+    subprocess.run(' '.join(cmd), shell=True)
 
     shutil.rmtree("process/masks")
 
@@ -717,10 +489,7 @@ def background_worker():
         if job['version'] == JOB_VERSION:
             print("Start job", pkl)
             try:
-                if job['reverseTracking']:
-                    result = process_with_reverse_tracking(job['video'], job['projection'], job['masks'], job['crf'], job['erode'], job['forceInitMask'])
-                else:
-                    result = process(job['video'], job['projection'], job['masks'], job['crf'], job['erode'], job['forceInitMask'])
+                result = process_with_reverse_tracking(job['video'], job['projection'], job['masks'], job['crf'], job['erode'], job['forceInitMask'], job['outputHeight'], job['keepEq'])
                 
                 if result is not None and os.path.exists(result):
                     result_list.append(result)
@@ -754,14 +523,10 @@ def background_worker():
         time.sleep(1)
         WORKER_STATUS = "Idle"
 
-def add_job(video, projection, crf, erode, forceInitMask, reverseTracking):
+def add_job(video, projection, crf, erode, forceInitMask, video_output_height, keep_eq):
     RETURN_VALUES = 16
     if video is None:
         gr.Warning("Could not add Job: Video not found", duration=5)
-        return tuple(gr.skip() for _ in range(RETURN_VALUES))
-
-    if not reverseTracking and not all(os.path.exists(os.path.join(x, '0000.png')) for x in ["masksL", "masksR"]):
-        gr.Warning("Could not add Job: Mask for first frame does not exists", duration=5)
         return tuple(gr.skip() for _ in range(RETURN_VALUES))
 
     masksFiles = sorted([f for f in os.listdir('masksL') if f.endswith(".png") and os.path.exists(os.path.join('masksR', f))])
@@ -805,7 +570,8 @@ def add_job(video, projection, crf, erode, forceInitMask, reverseTracking):
         'masks': masks,
         'erode': erode,
         'forceInitMask': forceInitMask,
-        'reverseTracking': reverseTracking
+        'outputHeight':  video_output_height,
+        'keepEq': keep_eq
     }
 
     with open(f"/jobs/{ts}.pkl", "wb") as f:
@@ -864,7 +630,7 @@ def set_extract_frames_step(x):
     SECONDS = int(x)
     print("set extract seconds to", SECONDS)
 
-def extract_frames(video, projection, mask_size, frames_seconds):
+def extract_frames(video, projection, mask_size, frames_seconds, keep_eq):
     set_mask_size(mask_size)
     set_extract_frames_step(frames_seconds)
     for dir in ["frames", "previews", "masksL", 'masksR']:
@@ -873,7 +639,7 @@ def extract_frames(video, projection, mask_size, frames_seconds):
 
         os.makedirs(dir, exist_ok=True)
 
-    if str(projection) == "eq":
+    if not keep_eq and str(projection) == "eq":
         filter_complex = "split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack[v]"
         os.system(f"ffmpeg -hide_banner -loglevel warning -hwaccel auto -i \"{video.name}\" -frames:v 1 -filter_complex \"[0:v]{filter_complex}\" -map \"[v]\" frames/0000.png")
         if SECONDS > 0:
@@ -1160,6 +926,7 @@ with gr.Blocks() as demo:
         gr.Markdown("## Stage 1 - Video")
         input_video = gr.File(label="Upload Video (MKV or MP4)", file_types=["mkv", "mp4", "video"])
         projection_dropdown = gr.Dropdown(choices=["eq", "fisheye180", "fisheye190", "fisheye200"], label="VR Video Source Format", value="eq")
+        keep_eq = gr.Checkbox(label="Keep Equirectangular Format. Do not convert to fisheye view. (HereSphere VR Player can play equirectangular with packed alpha, but some artifacts appear at the 180° boundary)", value=True, info="")
         mask_size = gr.Number(
             label="Mask Size (Mask Size larger than 40% of video height make no sense, higher mask value require more VRAM, 1440 require approx. 20GB VRAM)",
             minimum=512,
@@ -1179,7 +946,6 @@ with gr.Blocks() as demo:
         gr.Markdown("## Stage 2 - Extract First Frame")
         frame_button = gr.Button("Extract Projection Frame")
         gr.Markdown("### Frames")
-        gr.Markdown("Important: Without reverse tracking you need to provide/generate a mask for 0 sec, Masks for the other frames are optional")
         gallery = gr.Gallery(label="Extracted Frames", show_label=True, columns=4, object_fit="contain")
         select_button = gr.Button("Load Slected Projection Frame")
         with gr.Row():
@@ -1339,7 +1105,7 @@ with gr.Blocks() as demo:
 
         frame_button.click(
             fn=extract_frames,
-            inputs=[input_video, projection_dropdown, mask_size, extract_frames_step],
+            inputs=[input_video, projection_dropdown, mask_size, extract_frames_step, keep_eq],
             outputs=[gallery]
         )
 
@@ -1388,12 +1154,18 @@ with gr.Blocks() as demo:
         gr.Markdown("## Stage 4 - Add Job")
         crf_dropdown = gr.Dropdown(choices=[16,17,18,19,20,21,22], label="Encode CRF", value=16)
         erode_checkbox = gr.Checkbox(label="Erode Mask Output", value=True, info="")
-        force_init_mask_checkbox = gr.Checkbox(label="Force Init Mask", value=False, info="")
-        reverse_tracking_checkbox = gr.Checkbox(label="Reverse Tracking (caches mask for all frames inside /app/process until completed!)", value=True, info="")
+        force_init_mask_checkbox = gr.Checkbox(label="Force Init Mask (Not recommend!)", value=False, info="")
+        output_resolution_heigh = gr.Number(
+            label="Set video output resolution height. (In HereSphere VR and DeoVR some resultion cause a invalid slightly shifted preview mask). Use a workign output video resolution height (e.g. 4096). To keep original resolution set to 0",
+            minimum=0,
+            maximum=10000000,
+            step=1,
+            value=4096
+        )
         add_button = gr.Button("Add Job")
         add_button.click(
             fn=add_job,
-            inputs=[input_video, projection_dropdown, crf_dropdown, erode_checkbox, force_init_mask_checkbox, reverse_tracking_checkbox],
+            inputs=[input_video, projection_dropdown, crf_dropdown, erode_checkbox, force_init_mask_checkbox, output_resolution_heigh, keep_eq],
             outputs=[input_video, framePreviewL, framePreviewR, maskPreviewL, mergedMaskL, maskPreviewR, mergedMaskR, maskL, maskR, maskSelectionL, maskSelectionR, previewMergedMask, exampleL, exampleR, postprocessedMaskL, postprocessedMaskR]
         )
 

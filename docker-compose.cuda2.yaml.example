@@ -14,3 +14,6 @@ services:
     ports:
       - "7860:7860"
     ipc: host
+    volumes:
+    - ./jobs:/jobs
+    - ./process:/app/process
