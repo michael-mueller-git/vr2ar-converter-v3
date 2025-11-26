@@ -55,9 +55,9 @@ WARMUP = 4
 JOB_VERSION = 4
 SSIM_THRESHOLD = float(os.environ.get('SSIM_THRESHOLD', "0.983"))
 DEBUG = False
-MASK_DEBUG = bool(os.environ.get('MASK_DEBUG', "False"))
-SURPLUS_IGNORE =  bool(os.environ.get('SURPLUS_IGNORE', "True"))
-SCHEDULE = bool(os.environ.get('EXECUTE_SCHEDULER_ON_START', "True"))
+MASK_DEBUG = os.environ.get('MASK_DEBUG', 'False').lower() == 'true'
+SURPLUS_IGNORE = os.environ.get('SURPLUS_IGNORE', 'True').lower() == 'true'
+SCHEDULE = os.environ.get('EXECUTE_SCHEDULER_ON_START', 'True').lower() == 'true'
 
 def gen_dilate(alpha, min_kernel_size, max_kernel_size): 
     kernel_size = random.randint(min_kernel_size, max_kernel_size)
