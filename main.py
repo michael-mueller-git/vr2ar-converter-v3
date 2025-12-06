@@ -926,7 +926,7 @@ with gr.Blocks() as demo:
         gr.Markdown("## Stage 1 - Video")
         input_video = gr.File(label="Upload Video (MKV or MP4)", file_types=["mkv", "mp4", "video"])
         projection_dropdown = gr.Dropdown(choices=["eq", "fisheye180", "fisheye190", "fisheye200"], label="VR Video Source Format", value="eq")
-        keep_eq = gr.Checkbox(label="Keep Equirectangular Format. Do not convert to fisheye view. (HereSphere VR Player can play equirectangular with packed alpha, but some artifacts appear at the 180° boundary)", value=True, info="")
+        keep_eq = gr.Checkbox(label="Keep Equirectangular Format. Do not convert to fisheye view. (HereSphere VR Player can play equirectangular with packed alpha, but some artifacts appear at the 180° boundary)", value=False, info="")
         mask_size = gr.Number(
             label="Mask Size (Mask Size larger than 40% of video height make no sense, higher mask value require more VRAM, 1440 require approx. 20GB VRAM)",
             minimum=512,
