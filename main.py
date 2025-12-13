@@ -630,6 +630,24 @@ def set_extract_frames_step(x):
     SECONDS = int(x)
     print("set extract seconds to", SECONDS)
 
+def set_prefered_mask_size(input_video):
+    global MASK_SIZE
+    try:
+        video_info = FFmpegStream.get_video_info(input_video)
+        prefered_mask_height = round(video_info.height * 0.4 / 2.0) * 2
+        set_mask_size(prefered_mask_height)
+    except Exception as ex:
+        print(ex)
+    
+    return MASK_SIZE
+
+def get_prevered_output_height(height):
+    for h in [2048, 3072, 3600, 3840, 4000, 4096]:
+        if h >= height:
+            return h
+
+    return 0
+
 def extract_frames(video, projection, mask_size, frames_seconds, keep_eq):
     set_mask_size(mask_size)
     set_extract_frames_step(frames_seconds)
@@ -650,13 +668,16 @@ def extract_frames(video, projection, mask_size, frames_seconds, keep_eq):
             os.system(f"ffmpeg -hide_banner -loglevel warning -hwaccel auto -i \"{video.name}\" -vf fps=1/{SECONDS} -pix_fmt bgr24 -start_number 1 frames/%04d.png")
     
     frames = [os.path.join('frames', f) for f in os.listdir('frames') if f.endswith(".png")]
+    out_height = 0
 
     #NOTE: use same method for resizing to get pixel exact matches
     for frame in frames:
-        img_scaled = cv2.resize(cv2.imread(frame), (2*MASK_SIZE, MASK_SIZE))
+        frame_data = cv2.imread(frame)
+        out_height = frame_data.shape[0]
+        img_scaled = cv2.resize(frame_data, (2*MASK_SIZE, MASK_SIZE))
         cv2.imwrite(frame, img_scaled)
 
-    return generate_gallery_list()
+    return generate_gallery_list(), get_prevered_output_height(out_height)
 
 def get_selected(selected):
     global frame_name
@@ -925,10 +946,11 @@ with gr.Blocks() as demo:
     with gr.Column():
         gr.Markdown("## Stage 1 - Video")
         input_video = gr.File(label="Upload Video (MKV or MP4)", file_types=["mkv", "mp4", "video"])
-        projection_dropdown = gr.Dropdown(choices=["eq", "fisheye180", "fisheye190", "fisheye200"], label="VR Video Source Format", value="eq")
+        gr.Markdown("## Stage 2 - Video Parameter")
+        projection_dropdown = gr.Dropdown(choices=["eq", "fisheye180", "fisheye190", "fisheye200"], label="1.2 VR Video Source Format", value="eq")
         keep_eq = gr.Checkbox(label="Keep Equirectangular Format. Do not convert to fisheye view. (HereSphere VR Player can play equirectangular with packed alpha, but some artifacts appear at the 180° boundary)", value=False, info="")
         mask_size = gr.Number(
-            label="Mask Size (Mask Size larger than 40% of video height make no sense, higher mask value require more VRAM, 1440 require approx. 20GB VRAM)",
+            label="Mask Size is set automatically, but you can change it manually e.g. if your comupter have not enough VRAM (Mask Size larger than 40% of video height make no sense, higher mask value require more VRAM, 1440 require up to 20GB VRAM)",
             minimum=512,
             maximum=2048,
             step=1,
@@ -941,9 +963,14 @@ with gr.Blocks() as demo:
             step=1,
             value=SECONDS
         )
+        input_video.change(
+            fn=set_prefered_mask_size,
+            inputs=input_video,
+            outputs=mask_size,
+        )
 
     with gr.Column():
-        gr.Markdown("## Stage 2 - Extract First Frame")
+        gr.Markdown("## Stage 3 - Extract First Frame")
         frame_button = gr.Button("Extract Projection Frame")
         gr.Markdown("### Frames")
         gallery = gr.Gallery(label="Extracted Frames", show_label=True, columns=4, object_fit="contain")
@@ -952,7 +979,7 @@ with gr.Blocks() as demo:
             framePreviewL = gr.Image(value=None, type='numpy', format='png', image_mode='RGB')
             framePreviewR = gr.Image(value=None, type='numpy', format='png', image_mode='RGB')
 
-    gr.Markdown("## Stage 3 - Generate Mask")
+    gr.Markdown("## Stage 4 - Generate Mask")
     with gr.Tabs():
         with gr.Tab("Prompt"):
             with gr.Column():
@@ -1103,12 +1130,6 @@ with gr.Blocks() as demo:
             outputs=[postprocessedMaskL, postprocessedMaskR, gallery, previewMergedMask]
         )
 
-        frame_button.click(
-            fn=extract_frames,
-            inputs=[input_video, projection_dropdown, mask_size, extract_frames_step, keep_eq],
-            outputs=[gallery]
-        )
-
         selected_frame = gr.State(None)
         def store_index(evt: gr.SelectData):
             return evt.value
@@ -1151,11 +1172,11 @@ with gr.Blocks() as demo:
         )
 
     with gr.Column():
-        gr.Markdown("## Stage 4 - Add Job")
+        gr.Markdown("## Stage 5 - Add Job")
         crf_dropdown = gr.Dropdown(choices=[16,17,18,19,20,21,22], label="Encode CRF", value=16)
         erode_checkbox = gr.Checkbox(label="Erode Mask Output", value=True, info="")
         force_init_mask_checkbox = gr.Checkbox(label="Force Init Mask (Not recommend!)", value=False, info="")
-        output_resolution_heigh = gr.Number(
+        output_resolution_height = gr.Number(
             label="Set video output resolution height. (In HereSphere VR and DeoVR some resultion e.g. 1700 cause a invalid slightly shifted preview mask). Use a workign output video resolution height (2048, 3072, 3600, 3840, 4000, 4096). To keep original resolution set to 0",
             minimum=0,
             maximum=10000000,
@@ -1165,7 +1186,7 @@ with gr.Blocks() as demo:
         add_button = gr.Button("Add Job")
         add_button.click(
             fn=add_job,
-            inputs=[input_video, projection_dropdown, crf_dropdown, erode_checkbox, force_init_mask_checkbox, output_resolution_heigh, keep_eq],
+            inputs=[input_video, projection_dropdown, crf_dropdown, erode_checkbox, force_init_mask_checkbox, output_resolution_height, keep_eq],
             outputs=[input_video, framePreviewL, framePreviewR, maskPreviewL, mergedMaskL, maskPreviewR, mergedMaskR, maskL, maskR, maskSelectionL, maskSelectionR, previewMergedMask, exampleL, exampleR, postprocessedMaskL, postprocessedMaskR]
         )
 
@@ -1201,7 +1222,12 @@ with gr.Blocks() as demo:
         gr.Markdown("## Job Results")
         status = gr.Textbox(label="Status", lines=2)
         output_videos = gr.File(value=[], label="Download AR Videos", visible=True)
-        
+
+    frame_button.click(
+        fn=extract_frames,
+        inputs=[input_video, projection_dropdown, mask_size, extract_frames_step, keep_eq],
+        outputs=[gallery, output_resolution_height]
+    )
 
     timer1 = gr.Timer(2, active=True)
     timer5 = gr.Timer(5, active=True)
