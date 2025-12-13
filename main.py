@@ -635,7 +635,7 @@ def set_prefered_mask_size(input_video):
     try:
         video_info = FFmpegStream.get_video_info(input_video)
         prefered_mask_height = round(video_info.height * 0.4 / 2.0) * 2
-        set_mask_size(prefered_mask_height)
+        set_mask_size(max((820, prefered_mask_height)))
     except Exception as ex:
         print(ex)
     
@@ -947,7 +947,7 @@ with gr.Blocks() as demo:
         gr.Markdown("## Stage 1 - Video")
         input_video = gr.File(label="Upload Video (MKV or MP4)", file_types=["mkv", "mp4", "video"])
         gr.Markdown("## Stage 2 - Video Parameter")
-        projection_dropdown = gr.Dropdown(choices=["eq", "fisheye180", "fisheye190", "fisheye200"], label="1.2 VR Video Source Format", value="eq")
+        projection_dropdown = gr.Dropdown(choices=["eq", "fisheye180", "fisheye190", "fisheye200"], label="VR Video Source Format", value="eq")
         keep_eq = gr.Checkbox(label="Keep Equirectangular Format. Do not convert to fisheye view. (HereSphere VR Player can play equirectangular with packed alpha, but some artifacts appear at the 180° boundary)", value=False, info="")
         mask_size = gr.Number(
             label="Mask Size is set automatically, but you can change it manually e.g. if your comupter have not enough VRAM (Mask Size larger than 40% of video height make no sense, higher mask value require more VRAM, 1440 require up to 20GB VRAM)",
