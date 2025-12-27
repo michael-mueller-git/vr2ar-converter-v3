@@ -59,6 +59,21 @@ MASK_DEBUG = os.environ.get('MASK_DEBUG', 'False').lower() == 'true'
 SURPLUS_IGNORE = os.environ.get('SURPLUS_IGNORE', 'True').lower() == 'true'
 SCHEDULE = os.environ.get('EXECUTE_SCHEDULER_ON_START', 'True').lower() == 'true'
 
+
+_target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Monkey-Patch .cuda() - torch was programmed by idiots
+def set_global_gpu(gpu_index):
+    global _target_device
+    _target_device = torch.device(f"cuda:{gpu_index}")
+    torch.cuda.set_device(gpu_index)
+    
+    # Override .cuda() globally
+    original_cuda = torch.Tensor.cuda
+    def cuda_proxy(tensor, *args, **kwargs):
+        return original_cuda(tensor, _target_device)
+    torch.Tensor.cuda = cuda_proxy
+
 gpu_choices = []
 if torch.cuda.is_available():
     num_gpus = torch.cuda.device_count()
@@ -950,6 +965,7 @@ def on_gpu_change(selected_gpu):
         device = f"cuda:{gpu_index}"
         torch.set_default_device(device)
         torch.cuda.set_device(gpu_index)
+        set_global_gpu(gpu_index)
 
     print("device", device)
 
