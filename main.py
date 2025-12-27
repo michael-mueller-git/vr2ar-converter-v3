@@ -60,22 +60,7 @@ SURPLUS_IGNORE = os.environ.get('SURPLUS_IGNORE', 'True').lower() == 'true'
 SCHEDULE = os.environ.get('EXECUTE_SCHEDULER_ON_START', 'True').lower() == 'true'
 
 
-_target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Monkey-Patch .cuda() - torch was programmed by idiots
-def set_global_gpu(gpu_index):
-    global _target_device
-    _target_device = torch.device(f"cuda:{gpu_index}")
-    torch.cuda.set_device(gpu_index)
-    
-    # FIXED: Respect original signature
-    original_cuda = torch.Tensor.cuda
-    def cuda_proxy(self, device=None, non_blocking=False, **kwargs):
-        if device is None:
-            device = _target_device
-        return original_cuda(self, device=device, non_blocking=non_blocking, **kwargs)
-    
-    torch.Tensor.cuda = cuda_proxy
+DEVICE_JOB = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 gpu_choices = []
 if torch.cuda.is_available():
@@ -108,7 +93,7 @@ def prepare_frame(frame, has_cuda=True):
         vframes = vframes.permute(2, 0, 1)
     
     if has_cuda:
-         vframes =  vframes.cuda()
+         vframes =  vframes.to(DEVICE_JOB)
 
     image_input = vframes.float() / 255.0
 
@@ -124,7 +109,7 @@ def prepare_mask(mask):
 def finalize_mask(mask):
     mask = torch.from_numpy(mask)
     if torch.torch.cuda.is_available():
-        mask = mask.cuda()
+        mask = mask.to(DEVICE_JOB)
 
     return mask
 
@@ -134,7 +119,7 @@ def fix_mask2(mask):
     mask = gen_erosion(mask, 10, 10)
     mask = torch.from_numpy(mask)
     if torch.torch.cuda.is_available():
-        mask = mask.cuda()
+        mask = mask.to(DEVICE_JOB)
 
     return mask
 
@@ -184,13 +169,13 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
 
     matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
     if torch.torch.cuda.is_available():
-        matanyone1 = matanyone1.cuda()
+        matanyone1 = matanyone1.to(DEVICE_JOB)
     matanyone1 = matanyone1.eval()
     processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg)
 
     matanyone2 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
     if torch.torch.cuda.is_available():
-        matanyone2 = matanyone2.cuda()
+        matanyone2 = matanyone2.to(DEVICE_JOB)
     matanyone2 = matanyone2.eval()
     processor2 = InferenceCore(matanyone2, cfg=matanyone2.cfg)
 
@@ -925,7 +910,7 @@ def generate_example(maskL, maskR):
     with torch.no_grad():
         matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
         if torch.torch.cuda.is_available():
-            matanyone1 = matanyone1.cuda()
+            matanyone1 = matanyone1.to(DEVICE_JOB)
         matanyone1 = matanyone1.eval()
         processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg)
 
@@ -961,6 +946,7 @@ def clear_completed_jobs():
             os.remove(file_path)
 
 def on_gpu_change(selected_gpu):
+    global DEVICE_JOB
     if "CPU" in selected_gpu:
         device = "cpu"
     else:
@@ -968,7 +954,7 @@ def on_gpu_change(selected_gpu):
         device = f"cuda:{gpu_index}"
         torch.set_default_device(device)
         torch.cuda.set_device(gpu_index)
-        set_global_gpu(gpu_index)
+        DEVICE_JOB = torch.device(f"cuda:{gpu_index}")
 
     print("device", device)
 
