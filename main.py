@@ -68,10 +68,13 @@ def set_global_gpu(gpu_index):
     _target_device = torch.device(f"cuda:{gpu_index}")
     torch.cuda.set_device(gpu_index)
     
-    # Override .cuda() globally
+    # FIXED: Respect original signature
     original_cuda = torch.Tensor.cuda
-    def cuda_proxy(tensor, *args, **kwargs):
-        return original_cuda(tensor, _target_device)
+    def cuda_proxy(self, device=None, non_blocking=False, **kwargs):
+        if device is None:
+            device = _target_device
+        return original_cuda(self, device=device, non_blocking=non_blocking, **kwargs)
+    
     torch.Tensor.cuda = cuda_proxy
 
 gpu_choices = []
