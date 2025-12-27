@@ -169,12 +169,12 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
     matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
     matanyone1 = matanyone1.to(DEVICE_JOB)
     matanyone1 = matanyone1.eval()
-    processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg)
+    processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg, device=DEVICE_JOB)
 
     matanyone2 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
     matanyone2 = matanyone2.to(DEVICE_JOB)
     matanyone2 = matanyone2.eval()
-    processor2 = InferenceCore(matanyone2, cfg=matanyone2.cfg)
+    processor2 = InferenceCore(matanyone2, cfg=matanyone2.cfg, device=DEVICE_JOB)
 
     for i in range(len(masks)):
         imgLV = prepare_frame(masks[i]['frameL'])
@@ -908,7 +908,7 @@ def generate_example(maskL, maskR):
         matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
         matanyone1 = matanyone1.to(DEVICE_JOB)
         matanyone1 = matanyone1.eval()
-        processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg)
+        processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg, device=DEVICE_JOB)
 
         result = []
 
