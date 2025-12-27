@@ -62,13 +62,34 @@ SCHEDULE = os.environ.get('EXECUTE_SCHEDULER_ON_START', 'True').lower() == 'true
 
 DEVICE_JOB = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def on_gpu_change(selected_gpu):
+    global DEVICE_JOB
+    if "CPU" in selected_gpu:
+        device = "cpu"
+    else:
+        gpu_index = int(selected_gpu.split(":")[0].split()[-1])
+        device = f"cuda:{gpu_index}"
+        DEVICE_JOB = torch.device(f"cuda:{gpu_index}")
+
+    print("device", device)
+
 gpu_choices = []
+gpu_select = {
+    "idx": 0,
+    "vram": 0
+}
 if torch.cuda.is_available():
     num_gpus = torch.cuda.device_count()
+
     for i in range(num_gpus):
         props = torch.cuda.get_device_properties(i)
         total_vram_gb = props.total_memory / (1024**3)
+        if total_vram_gb >= gpu_select["vram"]:
+            gpu_select["idx"] = i
+            gpu_select["vram"] = total_vram_gb
         gpu_choices.append(f"GPU {i}: {props.name} ({total_vram_gb:.1f} GB)")
+        # by default select gpu with most vram
+        DEVICE_JOB = torch.device("cuda:{}".format(gpu_select["idx"]))
 else:
     gpu_choices = ["CPU"]
 
@@ -935,17 +956,6 @@ def clear_completed_jobs():
         if os.path.isfile(file_path):
             os.remove(file_path)
 
-def on_gpu_change(selected_gpu):
-    global DEVICE_JOB
-    if "CPU" in selected_gpu:
-        device = "cpu"
-    else:
-        gpu_index = int(selected_gpu.split(":")[0].split()[-1])
-        device = f"cuda:{gpu_index}"
-        DEVICE_JOB = torch.device(f"cuda:{gpu_index}")
-
-    print("device", device)
-
 with gr.Blocks() as demo:
     gr.Markdown("# Video VR2AR Converter")
     gr.Markdown('''
@@ -959,7 +969,7 @@ with gr.Blocks() as demo:
     ''')
     with gr.Column():
         gr.Markdown("## Settings")
-        gpu_dropdown = gr.Dropdown(choices=gpu_choices, label="Select GPU (currently only global for all jobs)", value=gpu_choices[0])
+        gpu_dropdown = gr.Dropdown(choices=gpu_choices, label="Select GPU (currently only global for all jobs, do not change when a job is running!)", value=gpu_choices[gpu_select["idx"]])
         gpu_dropdown.change(
             fn=on_gpu_change, 
             inputs=gpu_dropdown, 
