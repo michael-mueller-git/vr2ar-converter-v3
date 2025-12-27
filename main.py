@@ -59,6 +59,16 @@ MASK_DEBUG = os.environ.get('MASK_DEBUG', 'False').lower() == 'true'
 SURPLUS_IGNORE = os.environ.get('SURPLUS_IGNORE', 'True').lower() == 'true'
 SCHEDULE = os.environ.get('EXECUTE_SCHEDULER_ON_START', 'True').lower() == 'true'
 
+gpu_choices = []
+if torch.cuda.is_available():
+    num_gpus = torch.cuda.device_count()
+    for i in range(num_gpus):
+        props = torch.cuda.get_device_properties(i)
+        total_vram_gb = props.total_memory / (1024**3)
+        gpu_choices.append(f"GPU {i}: {props.name} ({total_vram_gb:.1f} GB)")
+else:
+    gpu_choices = ["CPU"]
+
 def gen_dilate(alpha, min_kernel_size, max_kernel_size): 
     kernel_size = random.randint(min_kernel_size, max_kernel_size)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size,kernel_size))
@@ -932,6 +942,16 @@ def clear_completed_jobs():
         if os.path.isfile(file_path):
             os.remove(file_path)
 
+def on_gpu_change(selected_gpu):
+    if "CPU" in selected_gpu:
+        device = "cpu"
+    else:
+        gpu_index = int(selected_gpu.split(":")[0].split()[-1])
+        torch.cuda.set_device(gpu_index)
+        device = f"cuda:{gpu_index}"
+
+    print("device", device)
+
 with gr.Blocks() as demo:
     gr.Markdown("# Video VR2AR Converter")
     gr.Markdown('''
@@ -944,6 +964,13 @@ with gr.Blocks() as demo:
         5. Add Video Mask Job
     ''')
     with gr.Column():
+        gr.Markdown("## Settings")
+        gpu_dropdown = gr.Dropdown(choices=gpu_choices, label="Select GPU (currently only global for all jobs)", value=gpu_choices[0])
+        gpu_dropdown.change(
+            fn=on_gpu_change, 
+            inputs=gpu_dropdown, 
+            outputs=None
+        )
         gr.Markdown("## Stage 1 - Video")
         input_video = gr.File(label="Upload Video (MKV or MP4)", file_types=["mkv", "mp4", "video"])
         gr.Markdown("## Stage 2 - Video Parameter")
