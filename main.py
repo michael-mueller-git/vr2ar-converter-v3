@@ -167,13 +167,9 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
     result_name = file_name + "_" + str(projection_out).upper() + "_alpha" + file_extension
 
     matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
-    matanyone1 = matanyone1.to(DEVICE_JOB)
-    matanyone1 = matanyone1.eval()
     processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg, device=DEVICE_JOB)
 
     matanyone2 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
-    matanyone2 = matanyone2.to(DEVICE_JOB)
-    matanyone2 = matanyone2.eval()
     processor2 = InferenceCore(matanyone2, cfg=matanyone2.cfg, device=DEVICE_JOB)
 
     for i in range(len(masks)):
@@ -906,8 +902,6 @@ def generate_example(maskL, maskR):
 
     with torch.no_grad():
         matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
-        matanyone1 = matanyone1.to(DEVICE_JOB)
-        matanyone1 = matanyone1.eval()
         processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg, device=DEVICE_JOB)
 
         result = []
