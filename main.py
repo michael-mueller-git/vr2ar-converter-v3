@@ -947,8 +947,9 @@ def on_gpu_change(selected_gpu):
         device = "cpu"
     else:
         gpu_index = int(selected_gpu.split(":")[0].split()[-1])
-        torch.cuda.set_device(gpu_index)
         device = f"cuda:{gpu_index}"
+        torch.set_default_device(device)
+        torch.cuda.set_device(gpu_index)
 
     print("device", device)
 
