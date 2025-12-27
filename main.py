@@ -86,14 +86,14 @@ def gen_erosion(alpha, min_kernel_size, max_kernel_size):
     erode = cv2.erode(fg, kernel, iterations=1)*255
     return erode.astype(np.float32)
 
-def prepare_frame(frame, has_cuda=True):
+def prepare_frame(frame):
+    global DEVICE_JOB
     vframes = torch.from_numpy(frame)
         
     if vframes.shape[-1] == 3:
         vframes = vframes.permute(2, 0, 1)
     
-    if has_cuda:
-         vframes =  vframes.to(DEVICE_JOB)
+    vframes =  vframes.to(DEVICE_JOB)
 
     image_input = vframes.float() / 255.0
 
@@ -107,19 +107,19 @@ def prepare_mask(mask):
     return mask
 
 def finalize_mask(mask):
+    global DEVICE_JOB
     mask = torch.from_numpy(mask)
-    if torch.torch.cuda.is_available():
-        mask = mask.to(DEVICE_JOB)
+    mask = mask.to(DEVICE_JOB)
 
     return mask
 
 def fix_mask2(mask):
+    global DEVICE_JOB
     mask = np.array(mask)
     mask = gen_dilate(mask, 10, 10)
     mask = gen_erosion(mask, 10, 10)
     mask = torch.from_numpy(mask)
-    if torch.torch.cuda.is_available():
-        mask = mask.to(DEVICE_JOB)
+    mask = mask.to(DEVICE_JOB)
 
     return mask
 
@@ -127,6 +127,7 @@ def fix_mask2(mask):
 @torch.no_grad()
 def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = False, force_init_mask=False, output_height=0, keepEq=False):
     global WORKER_STATUS
+    global DEVICE_JOB
 
     maskIdx = 0
     mask_w, mask_h = masks[maskIdx]['maskL'].size
@@ -156,8 +157,6 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
     current_frame = 0
     objects = [1]
 
-    has_cuda = torch.torch.cuda.is_available()
-
     ffmpeg = FFmpegStream(
         video_path = video,
         config = reader_config,
@@ -168,20 +167,18 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
     result_name = file_name + "_" + str(projection_out).upper() + "_alpha" + file_extension
 
     matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
-    if torch.torch.cuda.is_available():
-        matanyone1 = matanyone1.to(DEVICE_JOB)
+    matanyone1 = matanyone1.to(DEVICE_JOB)
     matanyone1 = matanyone1.eval()
     processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg)
 
     matanyone2 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
-    if torch.torch.cuda.is_available():
-        matanyone2 = matanyone2.to(DEVICE_JOB)
+    matanyone2 = matanyone2.to(DEVICE_JOB)
     matanyone2 = matanyone2.eval()
     processor2 = InferenceCore(matanyone2, cfg=matanyone2.cfg)
 
     for i in range(len(masks)):
-        imgLV = prepare_frame(masks[i]['frameL'], has_cuda)
-        imgRV = prepare_frame(masks[i]['frameR'], has_cuda)
+        imgLV = prepare_frame(masks[i]['frameL'])
+        imgRV = prepare_frame(masks[i]['frameR'])
         imgLMask = fix_mask2(masks[i]['maskL'])
         imgRMask = fix_mask2(masks[i]['maskR'])
         _ = processor1.step(imgLV, imgLMask, objects=objects, force_permanent=True)
@@ -231,8 +228,8 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
                 if s2 > SSIM_THRESHOLD:
                     frame_match = True
 
-        imgLV = prepare_frame(imgL, has_cuda)
-        imgRV = prepare_frame(imgR, has_cuda)
+        imgLV = prepare_frame(imgL)
+        imgRV = prepare_frame(imgR)
 
         if frame_match:
             print("match at", current_frame)
@@ -310,8 +307,8 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
                 imgL = img_scaled[:, :int(width/2)]
                 imgR = img_scaled[:, int(width/2):]
 
-                imgLV = prepare_frame(imgL, has_cuda)
-                imgRV = prepare_frame(imgR, has_cuda)
+                imgLV = prepare_frame(imgL)
+                imgRV = prepare_frame(imgR)
 
                 output_prob_L = processor1.step(imgLV)
                 output_prob_R = processor2.step(imgRV)
@@ -909,8 +906,7 @@ def generate_example(maskL, maskR):
 
     with torch.no_grad():
         matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
-        if torch.torch.cuda.is_available():
-            matanyone1 = matanyone1.to(DEVICE_JOB)
+        matanyone1 = matanyone1.to(DEVICE_JOB)
         matanyone1 = matanyone1.eval()
         processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg)
 
@@ -921,7 +917,7 @@ def generate_example(maskL, maskR):
         for (frame, mask) in [(frameL, maskL), (frameR, maskR)]:
             objects = [1]
             mask = fix_mask2(mask)
-            frame = prepare_frame(frame, torch.torch.cuda.is_available())
+            frame = prepare_frame(frame)
             output_prob = processor1.step(frame, mask, objects=objects)
             for _ in range(WARMUP):
                 output_prob = processor1.step(frame, first_frame_pred=True)
@@ -952,8 +948,6 @@ def on_gpu_change(selected_gpu):
     else:
         gpu_index = int(selected_gpu.split(":")[0].split()[-1])
         device = f"cuda:{gpu_index}"
-        torch.set_default_device(device)
-        torch.cuda.set_device(gpu_index)
         DEVICE_JOB = torch.device(f"cuda:{gpu_index}")
 
     print("device", device)
