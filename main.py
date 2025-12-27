@@ -62,22 +62,26 @@ SCHEDULE = os.environ.get('EXECUTE_SCHEDULER_ON_START', 'True').lower() == 'true
 
 DEVICE_JOB = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def on_gpu_change(selected_gpu):
-    global DEVICE_JOB
-    if "CPU" in selected_gpu:
-        device = "cpu"
-    else:
-        gpu_index = int(selected_gpu.split(":")[0].split()[-1])
-        device = f"cuda:{gpu_index}"
-        DEVICE_JOB = torch.device(f"cuda:{gpu_index}")
-
-    print("device", device)
-
 gpu_choices = []
 gpu_select = {
     "idx": 0,
     "vram": 0
 }
+
+def on_gpu_change(selected_gpu):
+    global DEVICE_JOB
+    global gpu_select
+    if "CPU" in selected_gpu:
+        device = "cpu"
+    else:
+        gpu_index = int(selected_gpu.split(":")[0].split()[-1])
+        gpu_select["idx"] = gpu_index
+        gpu_select["vram"] = 0
+        device = f"cuda:{gpu_index}"
+        DEVICE_JOB = torch.device(f"cuda:{gpu_index}")
+
+    print("device", device)
+
 if torch.cuda.is_available():
     num_gpus = torch.cuda.device_count()
 
