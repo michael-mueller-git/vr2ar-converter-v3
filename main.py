@@ -189,7 +189,7 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
         watchdog_timeout_in_seconds = 0 # we can not use wd here
     )
 
-    result_name = file_name + "_" + str(projection_out).upper() + "_alpha" + file_extension
+    result_name = file_name + "_" + str(projection_out).upper() + "_alpha_vr2ar" + file_extension
 
     matanyone1 = MatAnyone.from_pretrained("PeiqingYang/MatAnyone")
     processor1 = InferenceCore(matanyone1, cfg=matanyone1.cfg, device=DEVICE_JOB)
@@ -598,7 +598,7 @@ def add_job(video, projection, crf, erode, forceInitMask, video_output_height, k
     with open(video.name, "rb") as f:
         job_data = {
             'version': JOB_VERSION,
-            'name': name,
+            'name': f"{ts}_{name}",
             'videoData': f.read(),
             'projection': projection,
             'crf': crf,
