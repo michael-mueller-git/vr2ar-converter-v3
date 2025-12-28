@@ -182,7 +182,7 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
     current_frame = 0
     objects = [1]
 
-    ffmpeg = FFmpegStream(p
+    ffmpeg = FFmpegStream(
         video_path = video,
         config = reader_config,
         skip_frames = 0,
