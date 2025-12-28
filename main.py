@@ -700,11 +700,11 @@ def get_prevered_output_height(height):
 def extract_frames(video, projection, mask_size, frames_seconds, keep_eq):
     set_mask_size(mask_size)
     set_extract_frames_step(frames_seconds)
-    for dir in ["frames", "previews", "masksL", 'masksR']:
-        if os.path.exists(dir):
-            shutil.rmtree(dir)
+    for d in ["frames", "previews", "masksL", 'masksR']:
+        if os.path.exists(d):
+            shutil.rmtree(d)
 
-        os.makedirs(dir, exist_ok=True)
+        os.makedirs(d, exist_ok=True)
 
     if not keep_eq and str(projection) == "eq":
         filter_complex = "split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; [left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; [right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; [leftfisheye][rightfisheye]hstack[v]"
