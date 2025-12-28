@@ -995,7 +995,7 @@ with gr.Blocks() as demo:
             outputs=None
         )
         gr.Markdown("## Stage 1 - Video")
-        input_video = gr.File(label="Upload Video (MKV or MP4)", file_types=["mkv", "mp4", "video", "pkl"])
+        input_video = gr.File(label="Upload Video (MKV, MP4 or PKL job)")
         gr.Markdown("## Stage 2 - Video Parameter")
         projection_dropdown = gr.Dropdown(choices=["eq", "fisheye180", "fisheye190", "fisheye200"], label="VR Video Source Format", value="eq")
         keep_eq = gr.Checkbox(label="Keep Equirectangular Format. Do not convert to fisheye view. (HereSphere VR Player can play equirectangular with packed alpha, but some artifacts appear at the 180° boundary)", value=False, info="")
