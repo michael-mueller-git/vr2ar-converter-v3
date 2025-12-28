@@ -685,7 +685,7 @@ def input_video_changed(input_video):
     return MASK_SIZE, input_video
 
 def get_prevered_output_height(height):
-    for h in [2048, 3072, 3600, 3840, 4000, 4096]:
+    for h in [3600, 4000]:
         if h >= height:
             return h
 
@@ -1227,11 +1227,11 @@ with gr.Blocks() as demo:
         erode_checkbox = gr.Checkbox(label="Erode Mask Output", value=True, info="")
         force_init_mask_checkbox = gr.Checkbox(label="Force Init Mask (Not recommend!)", value=False, info="")
         output_resolution_height = gr.Number(
-            label="Set video output resolution height. (In HereSphere VR and DeoVR some resultion e.g. 1700 cause a invalid slightly shifted preview mask). Use a workign output video resolution height (2048, 3072, 3600, 3840, 4000, 4096). To keep original resolution set to 0",
+            label="Set video output resolution height. (In HereSphere VR and DeoVR some resultion e.g. 1700 cause a invalid slightly shifted preview mask, maybe a ffmpeg merge problem?). Use a workign output video resolution height (3600, 4000). To keep original resolution set to 0",
             minimum=0,
             maximum=10000000,
             step=1,
-            value=4096
+            value=4000
         )
         add_button = gr.Button("Add Job")
         add_button.click(
