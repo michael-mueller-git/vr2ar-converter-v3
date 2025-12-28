@@ -62,7 +62,6 @@ SCHEDULE = os.environ.get('EXECUTE_SCHEDULER_ON_START', 'True').lower() == 'true
 
 DEVICE_JOB = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-pkl_list = []
 gpu_choices = []
 gpu_select = {
     "idx": 0,
@@ -183,7 +182,7 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
     current_frame = 0
     objects = [1]
 
-    ffmpeg = FFmpegStream(
+    ffmpeg = FFmpegStream(p
         video_path = video,
         config = reader_config,
         skip_frames = 0,
@@ -488,12 +487,10 @@ result_list = []
 frame_name = None
 
 def background_worker():
-    global pkl_list
     global WORKER_STATUS
     surplus_url = os.environ.get('JOB_SURPLUS_CHECK_URL')
     while True:
         pkl = [x for x in glob.glob("/jobs/*.pkl")]
-        pkl_list = pkl
 
         if not SCHEDULE:
             time.sleep(3)
@@ -562,7 +559,6 @@ def background_worker():
         WORKER_STATUS = "Idle"
 
 def add_job(video, projection, crf, erode, forceInitMask, video_output_height, keep_eq):
-    global pkl_list
     RETURN_VALUES = 16
     if video is None:
         gr.Warning("Could not add Job: Video not found", duration=5)
@@ -618,7 +614,6 @@ def add_job(video, projection, crf, erode, forceInitMask, video_output_height, k
         pickle.dump(job_data, f)
 
     os.remove(video.name)
-    pkl_list.append(pkl_path)
     return tuple(None for _ in range(RETURN_VALUES))
 
 def status_text():
@@ -678,7 +673,6 @@ def input_video_changed(input_video):
         print("new job uploaded")
         dest = os.path.join('/jobs', os.path.basename(input_video))
         shutil.move(input_video, dest)
-        pkl_list.append(dest)
         return MASK_SIZE, None
 
     try:
@@ -977,6 +971,9 @@ def clear_completed_jobs():
         file_path = os.path.join(folder_path, filename)
         if os.path.isfile(file_path):
             os.remove(file_path)
+
+def update_pending_jobs():
+    return [x for x in glob.glob("/jobs/*.pkl")]
 
 with gr.Blocks() as demo:
     gr.Markdown("# Video VR2AR Converter")
@@ -1287,10 +1284,10 @@ with gr.Blocks() as demo:
     timer5 = gr.Timer(5, active=True)
     timer1.tick(status_text, outputs=status)
     timer5.tick(lambda: result_list, outputs=output_videos)
-    timer5.tick(lambda: pkl_list, outputs=pending_jobs_ui)
+    timer5.tick(update_pending_jobs, outputs=pending_jobs_ui)
     demo.load(fn=status_text, outputs=status)
     demo.load(fn=lambda: result_list, outputs=output_videos)
-    demo.load(fn=lambda: pkl_list, outputs=pending_jobs_ui)
+    demo.load(fn=update_pending_jobs, outputs=pending_jobs_ui)
 
 
 if __name__ == "__main__":
