@@ -52,7 +52,7 @@ WORKER_STATUS = "Idle"
 MASK_SIZE = 1440
 SECONDS = 10
 WARMUP = 4
-JOB_VERSION = 4
+JOB_VERSION = 5
 SSIM_THRESHOLD = float(os.environ.get('SSIM_THRESHOLD', "0.983"))
 DEBUG = False
 MASK_DEBUG = os.environ.get('MASK_DEBUG', 'False').lower() == 'true'
@@ -520,7 +520,11 @@ def background_worker():
         if job['version'] == JOB_VERSION:
             print("Start job", pkl)
             try:
-                result = process_with_reverse_tracking(job['video'], job['projection'], job['masks'], job['crf'], job['erode'], job['forceInitMask'], job['outputHeight'], job['keepEq'])
+                video_path = "/jobs/" + job['name']
+                with open(video_path, "wb") as out:
+                    out.write(job["videoData"])
+                result = process_with_reverse_tracking(video_path, job['projection'], job['masks'], job['crf'], job['erode'], job['forceInitMask'], job['outputHeight'], job['keepEq'])
+                os.remove(video_path)
                 
                 if result is not None and os.path.exists(result):
                     result_list.append(result)
@@ -547,7 +551,6 @@ def background_worker():
 
 
         os.makedirs('/jobs/completed', exist_ok=True)
-        shutil.move(job['video'], os.path.join('/jobs/completed', os.path.basename(job['video'])))
         shutil.move(pkl, os.path.join('/jobs/completed', os.path.basename(pkl)))
         print('job', pkl, 'completed')
 
@@ -590,24 +593,25 @@ def add_job(video, projection, crf, erode, forceInitMask, video_output_height, k
 
     ts = str(int(time.time()))
 
-    dest = '/jobs/' + ts + "_" + os.path.basename(video.name)
-    shutil.move(video.name, dest)
+    name = os.path.basename(video.name)
+    with open(video.name, "rb") as f:
+        job_data = {
+            'version': JOB_VERSION,
+            'name': name,
+            'videoData': f.read(),
+            'projection': projection,
+            'crf': crf,
+            'masks': masks,
+            'erode': erode,
+            'forceInitMask': forceInitMask,
+            'outputHeight':  video_output_height,
+            'keepEq': keep_eq
+        }
 
-    job_data = {
-        'version': JOB_VERSION,
-        'video': dest,
-        'projection': projection,
-        'crf': crf,
-        'masks': masks,
-        'erode': erode,
-        'forceInitMask': forceInitMask,
-        'outputHeight':  video_output_height,
-        'keepEq': keep_eq
-    }
-
-    with open(f"/jobs/{ts}.pkl", "wb") as f:
+    with open(f"/jobs/{ts}_{name}.pkl", "wb") as f:
         pickle.dump(job_data, f)
 
+    os.remove(video.name)
     return tuple(None for _ in range(RETURN_VALUES))
 
 def status_text():
