@@ -14,3 +14,7 @@ Use the provided container and deploy on device with nvida gpu. Then use the bui
 3. Wait for complete of process.
 4. Download the result
 5. Combine your chunks back into on video
+
+## TODO
+
+- Some output resolution cause slightly shifted mask. Analyse this fi this is an ffmpeg merge problem
