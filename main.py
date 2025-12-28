@@ -62,6 +62,7 @@ SCHEDULE = os.environ.get('EXECUTE_SCHEDULER_ON_START', 'True').lower() == 'true
 
 DEVICE_JOB = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+pkl_list = []
 gpu_choices = []
 gpu_select = {
     "idx": 0,
@@ -487,9 +488,13 @@ result_list = []
 frame_name = None
 
 def background_worker():
+    global pkl_list
     global WORKER_STATUS
     surplus_url = os.environ.get('JOB_SURPLUS_CHECK_URL')
     while True:
+        pkl = [x for x in glob.glob("/jobs/*.pkl")]
+        pkl_list = pkl
+
         if not SCHEDULE:
             time.sleep(3)
             continue
@@ -506,7 +511,6 @@ def background_worker():
                 time.sleep(30)
                 continue
 
-        pkl = [x for x in glob.glob("/jobs/*.pkl")]
 
         if len(pkl) == 0:
             time.sleep(2)
@@ -558,6 +562,7 @@ def background_worker():
         WORKER_STATUS = "Idle"
 
 def add_job(video, projection, crf, erode, forceInitMask, video_output_height, keep_eq):
+    global pkl_list
     RETURN_VALUES = 16
     if video is None:
         gr.Warning("Could not add Job: Video not found", duration=5)
@@ -608,10 +613,12 @@ def add_job(video, projection, crf, erode, forceInitMask, video_output_height, k
             'keepEq': keep_eq
         }
 
-    with open(f"/jobs/{ts}_{name}.pkl", "wb") as f:
+    pkl_path = f"/jobs/{ts}_{name}.pkl"
+    with open(pkl_path, "wb") as f:
         pickle.dump(job_data, f)
 
     os.remove(video.name)
+    pkl_list.append(pkl_path)
     return tuple(None for _ in range(RETURN_VALUES))
 
 def status_text():
@@ -665,8 +672,15 @@ def set_extract_frames_step(x):
     SECONDS = int(x)
     print("set extract seconds to", SECONDS)
 
-def set_prefered_mask_size(input_video):
+def input_video_changed(input_video):
     global MASK_SIZE
+    if str(input_video).endswith(".pkl"):
+        print("new job uploaded")
+        dest = os.path.join('/jobs', os.path.basename(input_video))
+        shutil.move(input_video, dest)
+        pkl_list.append(dest)
+        return MASK_SIZE, None
+
     try:
         video_info = FFmpegStream.get_video_info(input_video)
         prefered_mask_height = round(video_info.height * 0.4 / 2.0) * 2
@@ -674,7 +688,7 @@ def set_prefered_mask_size(input_video):
     except Exception as ex:
         print(ex)
     
-    return MASK_SIZE
+    return MASK_SIZE, input_video
 
 def get_prevered_output_height(height):
     for h in [2048, 3072, 3600, 3840, 4000, 4096]:
@@ -984,7 +998,7 @@ with gr.Blocks() as demo:
             outputs=None
         )
         gr.Markdown("## Stage 1 - Video")
-        input_video = gr.File(label="Upload Video (MKV or MP4)", file_types=["mkv", "mp4", "video"])
+        input_video = gr.File(label="Upload Video (MKV or MP4)", file_types=["mkv", "mp4", "video", "pkl"])
         gr.Markdown("## Stage 2 - Video Parameter")
         projection_dropdown = gr.Dropdown(choices=["eq", "fisheye180", "fisheye190", "fisheye200"], label="VR Video Source Format", value="eq")
         keep_eq = gr.Checkbox(label="Keep Equirectangular Format. Do not convert to fisheye view. (HereSphere VR Player can play equirectangular with packed alpha, but some artifacts appear at the 180° boundary)", value=False, info="")
@@ -1003,9 +1017,9 @@ with gr.Blocks() as demo:
             value=SECONDS
         )
         input_video.change(
-            fn=set_prefered_mask_size,
+            fn=input_video_changed,
             inputs=input_video,
-            outputs=mask_size,
+            outputs=[mask_size, input_video]
         )
 
     with gr.Column():
@@ -1235,6 +1249,7 @@ with gr.Blocks() as demo:
         ignore_surplus_checkbox = gr.Checkbox(label="Ignore Surplus Scheduling", value=SURPLUS_IGNORE, info="")
         clear_completed_jobs_button = gr.Button("Clear completed Jobs")
         restart_button = gr.Button("CLEANUP AND RESTART".upper())
+        pending_jobs_ui = gr.File(value=[], label="Pending Jobs", visible=True)
 
         restart_button.click(
             # dirty hack, we use k8s restart pod
@@ -1272,8 +1287,10 @@ with gr.Blocks() as demo:
     timer5 = gr.Timer(5, active=True)
     timer1.tick(status_text, outputs=status)
     timer5.tick(lambda: result_list, outputs=output_videos)
+    timer5.tick(lambda: pkl_list, outputs=pending_jobs_ui)
     demo.load(fn=status_text, outputs=status)
     demo.load(fn=lambda: result_list, outputs=output_videos)
+    demo.load(fn=lambda: pkl_list, outputs=pending_jobs_ui)
 
 
 if __name__ == "__main__":
