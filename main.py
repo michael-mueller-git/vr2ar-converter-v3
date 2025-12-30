@@ -299,6 +299,10 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
         mask_output_L_pha = (mask_output_L_pha*255).astype(np.uint8)
         mask_output_R_pha = (mask_output_R_pha*255).astype(np.uint8)
 
+        if erode:
+            mask_output_L_pha = cv2.erode(mask_output_L_pha, (3,3), iterations=2)
+            mask_output_R_pha = cv2.erode(mask_output_R_pha, (3,3), iterations=2)
+
         combined_mask = cv2.hconcat([mask_output_L_pha, mask_output_R_pha])
 
         if maskIdx < len(masks):
@@ -343,6 +347,10 @@ def process_with_reverse_tracking(video, projection, masks, crf = 16, erode = Fa
 
                 mask_output_L_pha = (mask_output_L_pha*255).astype(np.uint8)
                 mask_output_R_pha = (mask_output_R_pha*255).astype(np.uint8)
+
+                if erode:
+                    mask_output_L_pha = cv2.erode(mask_output_L_pha, (3,3), iterations=2)
+                    mask_output_R_pha = cv2.erode(mask_output_R_pha, (3,3), iterations=2)
 
                 combined_mask = cv2.hconcat([mask_output_L_pha, mask_output_R_pha])
                 maskA = cv2.imread(frame_file.replace('frames', 'masks'), cv2.IMREAD_UNCHANGED)
