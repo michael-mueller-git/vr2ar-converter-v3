@@ -686,7 +686,7 @@ def input_video_changed(input_video):
     try:
         video_info = FFmpegStream.get_video_info(input_video)
         prefered_mask_height = round(video_info.height * 0.4 / 2.0) * 2
-        set_mask_size(max((820, prefered_mask_height)))
+        set_mask_size(max((1024, prefered_mask_height)))
     except Exception as ex:
         print(ex)
     
