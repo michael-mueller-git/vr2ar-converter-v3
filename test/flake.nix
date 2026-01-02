@@ -15,6 +15,7 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = [
+            pkgs.ffmpeg
             (python.withPackages(ps: with ps; [ numpy opencv4 pillow ]))
           ];
         };
