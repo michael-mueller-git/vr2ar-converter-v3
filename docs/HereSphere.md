@@ -5,7 +5,7 @@
 Load required tools:
 
 ```sh
-nix-shell -p apksigner apktool zulu8
+nix-shell -p apksigner apktool zulu8 aapt
 ```
 
 1. Extract App:
