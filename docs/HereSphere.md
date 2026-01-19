@@ -12,6 +12,7 @@ nix-shell -p apksigner apktool zulu8
 
 ```sh
 adb devices  # check if device is detected
+adb shell pm list packages # find package
 adb pull "$(adb shell pm path com.heresphere.vrvideoplayer | cut -d ':' -f2)"
 apktool d base.apk
 ```
