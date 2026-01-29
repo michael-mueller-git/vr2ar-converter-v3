@@ -137,7 +137,7 @@ if result_valid:
         x1,y1,x2,y2 = result['area'][x]
         w = x2-x1
         h=y2-y1
-        cmd = f"ffmpeg -i input.mkv -vf \"crop={w}:{h}:{x1}:{y1}\" -y {out_filename}_roi_{x}.mp4"
+        cmd = f"ffmpeg -i \"{args.filepath}\" -vf \"crop={w}:{h}:{x1}:{y1}\" -y {out_filename}_roi_{x}.mp4"
         print(cmd)
         os.system(cmd)
         with open(f"{out_filename}_roi_{x}.json",'w') as f:
