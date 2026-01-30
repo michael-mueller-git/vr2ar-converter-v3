@@ -1,3 +1,5 @@
 *.pkl
 *.mp4
 *.mkv
+*.old
+*.json
