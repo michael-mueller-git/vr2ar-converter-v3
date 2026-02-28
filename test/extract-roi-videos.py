@@ -39,6 +39,7 @@ def get_boundary(frame):
     right_half = np.vstack((right_top, right_bottom))
 
     full_scaled_mask = np.hstack((left_half, right_half))
+
     original_mask = cv2.resize(full_scaled_mask, (w, h), interpolation=cv2.INTER_LINEAR)
     original_mask = Image.fromarray(original_mask)
     binary_mask = original_mask.convert("1")  # Pure black and white mask
@@ -80,31 +81,25 @@ parser.add_argument("filepath", type=str, help="ar video file path")
 parser.add_argument("--border", type=int, default=5, help="border value (default: 5)")
 args = parser.parse_args()
 
-cap = cv2.VideoCapture(args.filepath)
-total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-i = 0
+def is_image_input():
+    return args.filepath.endswith(".jpg") or args.filepath.endswith(".png")
+
 result = {}
-while True:
-    ret, frame = cap.read()
-    if i == 0:
-        h, w = frame.shape[:2]
-        result = {
-            'area': {
-                'left': [w//2, h, 0, 0],
-                'right': [w//2, h, 0, 0]
-            },
-            'size':  {
-                'w': w,
-                'h': h
-            }
+if is_image_input():
+    frame = cv2.imread(args.filepath)
+    h, w = frame.shape[:2]
+    result = {
+        'area': {
+            'left': [w//2, h, 0, 0],
+            'right': [w//2, h, 0, 0]
+        },
+        'size':  {
+            'w': w,
+            'h': h
         }
-    i += 1
-    
-    if not ret:
-        break
-        
-    print("scan frame", i, "/", total_frames)
+    }
     area = get_boundary(frame)
+    print(area)
     for x in result['area']:
         if area[x] is not None:
             result['area'][x][0] = min((result['area'][x][0], area[x][0]))
@@ -112,7 +107,39 @@ while True:
             result['area'][x][2] = max((result['area'][x][2], area[x][2]))
             result['area'][x][3] = max((result['area'][x][3], area[x][3]))
 
-cap.release()
+else:
+    cap = cv2.VideoCapture(args.filepath)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    i = 0
+    while True:
+        ret, frame = cap.read()
+        if i == 0:
+            h, w = frame.shape[:2]
+            result = {
+                'area': {
+                    'left': [w//2, h, 0, 0],
+                    'right': [w//2, h, 0, 0]
+                },
+                'size':  {
+                    'w': w,
+                    'h': h
+                }
+            }
+        i += 1
+        
+        if not ret:
+            break
+            
+        print("scan frame", i, "/", total_frames)
+        area = get_boundary(frame)
+        for x in result['area']:
+            if area[x] is not None:
+                result['area'][x][0] = min((result['area'][x][0], area[x][0]))
+                result['area'][x][1] = min((result['area'][x][1], area[x][1]))
+                result['area'][x][2] = max((result['area'][x][2], area[x][2]))
+                result['area'][x][3] = max((result['area'][x][3], area[x][3]))
+
+    cap.release()
 
 result_valid = True
 for x in result['area']:
@@ -137,7 +164,8 @@ if result_valid:
         x1,y1,x2,y2 = result['area'][x]
         w = x2-x1
         h=y2-y1
-        cmd = f"ffmpeg -i \"{args.filepath}\" -vf \"crop={w}:{h}:{x1}:{y1}\" -y {out_filename}_roi_{x}.mp4"
+        _, ext = os.path.splitext(args.filepath)
+        cmd = f"ffmpeg -i \"{args.filepath}\" -vf \"crop={w}:{h}:{x1}:{y1}\" -y {out_filename}_roi_{x}{ext}"
         print(cmd)
         os.system(cmd)
         with open(f"{out_filename}_roi_{x}.json",'w') as f:
