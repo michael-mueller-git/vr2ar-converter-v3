@@ -48,6 +48,10 @@ out_name = os.path.splitext(os.path.basename(args.src_video))[0]
 
 _, ext = os.path.splitext(args.src_video)
 
+if ext == ".jpg":
+    # improve output quality
+    ext = ".png"
+
 print("left res", left_out_res)
 print("right res", right_out_res)
 
