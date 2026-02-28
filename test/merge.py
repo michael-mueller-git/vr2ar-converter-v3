@@ -46,13 +46,17 @@ right_out_pos = (round(roi_right["x"] * scaling), round(roi_right["y"] * scaling
 
 out_name = os.path.splitext(os.path.basename(args.src_video))[0]
 
+_, ext = os.path.splitext(args.src_video)
+
+audio = "" if any(x == ext for x in [".png", ".jpg"]) else "-map 0:a -c:a copy"
+
 cmd = f"ffmpeg -i \"{args.src_video}\" -i \"{args.left_roi}\" -i \"{args.right_roi}\" -filter_complex \""
 cmd += f"[0:v]scale={out_res[1]}:{out_res[0]}[bg];"
 cmd += f"[1:v]scale={left_out_res[1]}:{left_out_res[0]}[ol];"
 cmd += f"[2:v]scale={right_out_res[1]}:{right_out_res[0]}[or];"
 cmd += f"[bg][ol]overlay={left_out_pos[0]}:{left_out_pos[1]}[tmp];"
 cmd += f"[tmp][or]overlay={right_out_pos[0]}:{right_out_pos[1]}"
-cmd += f"\" -map 0:a -c:a copy \"{out_name}-merged.mp4\""
+cmd += f"\" {audio} \"{out_name}-merged{ext}\""
 
 print(cmd)
 os.system(cmd)
