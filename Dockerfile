@@ -33,6 +33,10 @@ RUN pip install -q git+https://github.com/pq-yang/MatAnyone2
 RUN wget "https://github.com/pq-yang/MatAnyone/releases/download/v1.0.0/matanyone.pth" -O "/app/model/matanyone.pth"
 RUN wget "https://github.com/pq-yang/MatAnyone2/releases/download/v1.0.0/matanyone2.pth" -O "/app/model/matanyone2.pth"
 
+RUN mkdir -p /root/.cache/torch/hub/checkpoints
+RUN wget "https://download.pytorch.org/models/resnet50-19c8e357.pth" -O /root/.cache/torch/hub/checkpoints/resnet50-19c8e357.pth
+RUN wget "https://download.pytorch.org/models/resnet18-5c106cde.pth" -O  /root/.cache/torch/hub/checkpoints/resnet18-5c106cde.pth
+
 COPY requirements.txt /app
 
 RUN pip install -r requirements.txt
