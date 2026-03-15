@@ -38,7 +38,7 @@ from skimage.metrics import structural_similarity as ssim
 import torch.nn.functional as F
 import numpy as np
 
-from matanyone.inference.inference_core import InferenceCore
+from matanyone2.inference.inference_core import InferenceCore
 from matanyone2.utils.get_default_model import get_matanyone2_model
 from hydra.core.global_hydra import GlobalHydra
 
