@@ -29,9 +29,9 @@ RUN ln -s /app/grounding-dino/groundingdino_swinb_cogcoor.pth /app/model/groundi
 RUN ln -s /app/grounding-dino/GroundingDINO_SwinB.cfg.py /app/model/GroundingDINO_SwinB.cfg.py
 RUN ln -s /app/sam2/sam2.1_hiera_large.pt /app/model/sam2.1_hiera_large.pt
 
-RUN pip install -q git+https://github.com/pq-yang/MatAnyone
-# download model
-RUN python3 -c 'from matanyone.model.matanyone import MatAnyone; MatAnyone.from_pretrained("PeiqingYang/MatAnyone")'
+RUN pip install -q git+https://github.com/pq-yang/MatAnyone2
+RUN wget "https://github.com/pq-yang/MatAnyone/releases/download/v1.0.0/matanyone.pth" -O "/app/model/matanyone.pth"
+RUN wget "https://github.com/pq-yang/MatAnyone2/releases/download/v1.0.0/matanyone2.pth" -O "/app/model/matanyone2.pth"
 
 COPY requirements.txt /app
 

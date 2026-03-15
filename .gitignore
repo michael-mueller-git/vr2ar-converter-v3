@@ -1,3 +1,6 @@
 *.mkv
 *.mp4
 *.pt2
+.nix-portable
+.cache
+example/
