@@ -1175,6 +1175,34 @@ def postprocess_mask(maskL, maskR, dilate, erode):
     return maskL, maskR, generate_gallery_list(), os.path.join("previews", frame_name)
 
 
+def load_manual_mask(mergedMaskL, mergedMaskR):
+    return mergedMaskL, mergedMaskR
+
+
+def apply_manual_mask(manualMaskL, manualMaskR, mask_dilate, mask_erode):
+    if manualMaskL is None or manualMaskR is None:
+        return None, None, None, None, None, None
+
+    def ensure_gray(img):
+        if img is None:
+            return None
+        if len(img.shape) == 3:
+            return cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        return img
+
+    grayL = ensure_gray(manualMaskL)
+    grayR = ensure_gray(manualMaskR)
+
+    mergedL_pil = Image.fromarray(grayL).convert("L")
+    mergedR_pil = Image.fromarray(grayR).convert("L")
+
+    pL, pR, gallery_list, preview_path = postprocess_mask(
+        grayL, grayR, mask_dilate, mask_erode
+    )
+
+    return mergedL_pil, mergedR_pil, pL, pR, gallery_list, preview_path
+
+
 def merge_add_mask(maskL, maskR, mergedMaskL, mergedMaskR, dilate, erode):
     if maskL is not None and mergedMaskL is not None:
         mergedMaskL = np.bitwise_or(np.array(mergedMaskL), np.array(maskL))
@@ -1501,7 +1529,7 @@ with gr.Blocks() as demo:
             mask_add_button = gr.Button("Add Mask")
             mask_subtract_button = gr.Button("Subtract Mask")
 
-        gr.Markdown("Combinend Mask")
+        gr.Markdown("Combined Mask")
         with gr.Row():
             mergedMaskL = gr.Image(
                 value=None, type="numpy", format="png", image_mode="RGB"
@@ -1509,6 +1537,27 @@ with gr.Blocks() as demo:
             mergedMaskR = gr.Image(
                 value=None, type="numpy", format="png", image_mode="RGB"
             )
+
+        gr.Markdown("### Manual Mask Editor")
+        with gr.Row():
+            load_manual_button = gr.Button("Load Merged Mask")
+        with gr.Row():
+            manualMaskL = gr.Image(
+                value=None,
+                type="numpy",
+                format="png",
+                image_mode="RGB",
+                brush=gr.Sketchpad(),
+            )
+            manualMaskR = gr.Image(
+                value=None,
+                type="numpy",
+                format="png",
+                image_mode="RGB",
+                brush=gr.Sketchpad(),
+            )
+        with gr.Row():
+            apply_manual_button = gr.Button("Apply Manual Mask")
 
         gr.Markdown("Postporcessed Mask")
         mask_dilate = gr.Slider(
@@ -1557,6 +1606,24 @@ with gr.Blocks() as demo:
             fn=postprocess_mask,
             inputs=[mergedMaskL, mergedMaskR, mask_dilate, mask_erode],
             outputs=[
+                postprocessedMaskL,
+                postprocessedMaskR,
+                gallery,
+                previewMergedMask,
+            ],
+        )
+
+        load_manual_button.click(
+            fn=load_manual_mask,
+            inputs=[mergedMaskL, mergedMaskR],
+            outputs=[manualMaskL, manualMaskR],
+        )
+        apply_manual_button.click(
+            fn=apply_manual_mask,
+            inputs=[manualMaskL, manualMaskR, mask_dilate, mask_erode],
+            outputs=[
+                mergedMaskL,
+                mergedMaskR,
                 postprocessedMaskL,
                 postprocessedMaskR,
                 gallery,

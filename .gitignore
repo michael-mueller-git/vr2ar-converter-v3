@@ -4,3 +4,4 @@
 .nix-portable
 .cache
 example/
+__pycache__
