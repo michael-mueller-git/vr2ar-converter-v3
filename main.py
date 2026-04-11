@@ -1183,7 +1183,13 @@ def apply_manual_mask(manualMaskL, manualMaskR, mask_dilate, mask_erode):
     if manualMaskL is None or manualMaskR is None:
         return None, None, None, None, None, None
 
+    def extract_image(data):
+        if isinstance(data, dict):
+            return data.get("composite")
+        return data
+
     def ensure_gray(img):
+        img = extract_image(img)
         if img is None:
             return None
         if len(img.shape) == 3:
@@ -1192,6 +1198,9 @@ def apply_manual_mask(manualMaskL, manualMaskR, mask_dilate, mask_erode):
 
     grayL = ensure_gray(manualMaskL)
     grayR = ensure_gray(manualMaskR)
+
+    if grayL is None or grayR is None:
+        return None, None, None, None, None, None
 
     mergedL_pil = Image.fromarray(grayL).convert("L")
     mergedR_pil = Image.fromarray(grayR).convert("L")
@@ -1542,19 +1551,17 @@ with gr.Blocks() as demo:
         with gr.Row():
             load_manual_button = gr.Button("Load Merged Mask")
         with gr.Row():
-            manualMaskL = gr.Image(
+            manualMaskL = gr.ImageEditor(
                 value=None,
                 type="numpy",
                 format="png",
                 image_mode="RGB",
-                brush=gr.Sketchpad(),
             )
-            manualMaskR = gr.Image(
+            manualMaskR = gr.ImageEditor(
                 value=None,
                 type="numpy",
                 format="png",
                 image_mode="RGB",
-                brush=gr.Sketchpad(),
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
