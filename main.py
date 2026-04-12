@@ -1195,41 +1195,109 @@ def apply_manual_mask(
         return None, None, None, None, None, None
 
     def process_editor_data(editor_data):
+        print(f"DEBUG: process_editor_data input type: {type(editor_data)}")
         if editor_data is None:
+            print("DEBUG: editor_data is None")
             return None
-        if isinstance(editor_data, dict):
-            background = editor_data.get("background")
-            if background is None:
-                return None
-            if len(background.shape) == 3 and background.shape[2] == 4:
-                background = background[:, :, :3]
-            gray = cv2.cvtColor(background, cv2.COLOR_RGB2GRAY)
-            _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
-            return binary
-        if isinstance(editor_data, np.ndarray):
-            if len(editor_data.shape) == 3 and editor_data.shape[2] == 4:
-                editor_data = editor_data[:, :, :3]
-            if len(editor_data.shape) == 3:
-                gray = cv2.cvtColor(editor_data, cv2.COLOR_RGB2GRAY)
-            else:
-                gray = editor_data
-            _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
-            return binary
-        return None
 
+        final_image = None
+        if isinstance(editor_data, dict):
+            print(f"DEBUG: editor_data keys: {list(editor_data.keys())}")
+            # Gradio ImageEditor typically provides a 'composite' image which is the result of background + layers
+            if "composite" in editor_data and editor_data["composite"] is not None:
+                print("DEBUG: Using 'composite' from editor_data")
+                final_image = editor_data["composite"]
+            else:
+                print(
+                    "DEBUG: 'composite' not found, attempting to merge background and layers"
+                )
+                background = editor_data.get("background")
+                layers = editor_data.get("layers")
+                if background is None:
+                    print("DEBUG: background is None")
+                    return None
+
+                # Start with background
+                combined = background.copy()
+                if layers:
+                    print(f"DEBUG: merging {len(layers)} layers")
+                    for i, layer in enumerate(layers):
+                        # layers are typically dicts with 'image' and 'opacity'
+                        layer_img = layer.get("image")
+                        if layer_img is not None:
+                            # Simple additive merge for masks
+                            # If layer_img is the same size as combined
+                            if layer_img.shape == combined.shape:
+                                combined = np.maximum(combined, layer_img)
+                            else:
+                                print(
+                                    f"DEBUG: layer {i} size {layer_img.shape} mismatch with combined {combined.shape}"
+                                )
+                final_image = combined
+        elif isinstance(editor_data, np.ndarray):
+            print(f"DEBUG: editor_data is np.ndarray with shape {editor_data.shape}")
+            final_image = editor_data
+        else:
+            print(f"DEBUG: Unsupported editor_data type: {type(editor_data)}")
+            return None
+
+        if final_image is None:
+            print("DEBUG: final_image is None")
+            return None
+
+        # Handle RGBA/RGB
+        if len(final_image.shape) == 3:
+            if final_image.shape[2] == 4:
+                print("DEBUG: Converting RGBA to RGB")
+                final_image = final_image[:, :, :3]
+
+            if final_image.shape[2] == 3:
+                print("DEBUG: Converting RGB to GRAY")
+                gray = cv2.cvtColor(final_image, cv2.COLOR_RGB2GRAY)
+            else:
+                print(f"DEBUG: Unexpected channel count: {final_image.shape[2]}")
+                gray = final_image
+        else:
+            print("DEBUG: final_image is already grayscale or unexpected shape")
+            gray = final_image
+
+        _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+        print(
+            f"DEBUG: binary mask created. shape: {binary.shape}, max: {np.max(binary)}, min: {np.min(binary)}"
+        )
+        return binary
+
+    print(
+        f"DEBUG: apply_manual_mask called. L: {type(manualMaskL)}, R: {type(manualMaskR)}"
+    )
     binaryL = process_editor_data(manualMaskL)
     binaryR = process_editor_data(manualMaskR)
 
+    print(
+        f"DEBUG: binaryL shape: {binaryL.shape if binaryL is not None else 'None'}, binaryR shape: {binaryR.shape if binaryR is not None else 'None'}"
+    )
+
     if binaryL is None or binaryR is None:
+        print("DEBUG: binaryL or binaryR is None, returning None")
         return None, None, None, None, None, None
 
     mergedL_np = np.array(mergedMaskL)
     mergedR_np = np.array(mergedMaskR)
 
+    print(
+        f"DEBUG: mergedL_np shape: {mergedL_np.shape}, mergedR_np shape: {mergedR_np.shape}"
+    )
+
     if len(mergedL_np.shape) == 3:
+        print("DEBUG: mergedL_np is 3D, converting to GRAY")
         mergedL_np = cv2.cvtColor(mergedL_np, cv2.COLOR_RGB2GRAY)
     if len(mergedR_np.shape) == 3:
+        print("DEBUG: mergedR_np is 3D, converting to GRAY")
         mergedR_np = cv2.cvtColor(mergedR_np, cv2.COLOR_RGB2GRAY)
+
+    print(
+        f"DEBUG: mergedL_np shape after conversion: {mergedL_np.shape}, mergedR_np shape after conversion: {mergedR_np.shape}"
+    )
 
     if binaryL.shape != mergedL_np.shape:
         print(
@@ -1242,8 +1310,13 @@ def apply_manual_mask(
         )
         binaryR = cv2.resize(binaryR, (mergedR_np.shape[1], mergedR_np.shape[0]))
 
+    # Now we use the result of process_editor_data which should already be a merge of background + layers
     new_mergedL = binaryL
     new_mergedR = binaryR
+
+    print(
+        f"DEBUG: Final merged masks shapes: L {new_mergedL.shape}, R {new_mergedR.shape}"
+    )
 
     pL, pR, gallery_list, preview_path = postprocess_mask(
         new_mergedL, new_mergedR, mask_dilate, mask_erode
