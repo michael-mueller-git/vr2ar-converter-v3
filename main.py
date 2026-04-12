@@ -1192,88 +1192,65 @@ def load_manual_mask(mergedMaskL, mergedMaskR):
 def apply_manual_mask(
     manualMaskL, manualMaskR, mergedMaskL, mergedMaskR, mask_dilate, mask_erode
 ):
-    if (
-        manualMaskL is None
-        or manualMaskR is None
-        or mergedMaskL is None
-        or mergedMaskR is None
-    ):
-        return None, None, None, None, None, None
+    # 1. Prepare the base fallbacks independently
+    baseL = np.array(mergedMaskL) if mergedMaskL is not None else None
+    baseR = np.array(mergedMaskR) if mergedMaskR is not None else None
 
-    def extract_composite(editor_data):
-        if editor_data is None or not isinstance(editor_data, dict):
+    if baseL is not None and len(baseL.shape) == 3:
+        baseL = cv2.cvtColor(baseL, cv2.COLOR_RGB2GRAY)
+    if baseR is not None and len(baseR.shape) == 3:
+        baseR = cv2.cvtColor(baseR, cv2.COLOR_RGB2GRAY)
+
+    # 2. Safe extraction function
+    def get_binary_from_editor(editor_data, base_arr):
+        if base_arr is None:
             return None
+            
+        # If the user hasn't drawn anything, return the base mask
+        if editor_data is None or not isinstance(editor_data, dict):
+            _, bin_base = cv2.threshold(base_arr, 1, 255, cv2.THRESH_BINARY)
+            return bin_base.copy()
             
         composite = editor_data.get("composite")
-        background = editor_data.get("background")
-        
         if composite is None:
-            return None
-
-        # FIX 1: Gradio ImageEditor "Upside Down" Bug. Flip it vertically to correct it.
-        # If your image turns upside down again in a future Gradio update, just remove this line.
-        composite = cv2.flip(composite, 0) 
-
-        # Correct dimension resizing based on original background (solves 400px cropping)
-        if background is not None and composite.shape[:2] != background.shape[:2]:
-            composite = cv2.resize(
-                composite, 
-                (background.shape[1], background.shape[0]), 
-                interpolation=cv2.INTER_NEAREST
-            )
-
-        # Handle color/alpha channels properly
-        if len(composite.shape) == 3:
-            if composite.shape[2] == 4:  # Image has Alpha Channel (RGBA)
-                gray = cv2.cvtColor(composite, cv2.COLOR_RGBA2GRAY)
-            else:  # Image is RGB
-                gray = cv2.cvtColor(composite, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = composite.copy()
+            _, bin_base = cv2.threshold(base_arr, 1, 255, cv2.THRESH_BINARY)
+            return bin_base.copy()
             
-        return gray
+        # Convert PIL Image to Numpy safely (Fixes upside-down & coordinate bugs)
+        if hasattr(composite, 'convert'):
+            comp_np = np.array(composite.convert("L"))
+        else:
+            # Fallback just in case it's still numpy
+            comp_np = composite.copy()
+            if len(comp_np.shape) == 3:
+                comp_np = cv2.cvtColor(comp_np, cv2.COLOR_RGB2GRAY)
+                
+        # Force resize to match the original merged mask perfectly (Fixes cropping)
+        h, w = base_arr.shape[:2]
+        if comp_np.shape[:2] != (h, w):
+            comp_np = cv2.resize(comp_np, (w, h), interpolation=cv2.INTER_NEAREST)
+            
+        _, binary = cv2.threshold(comp_np, 1, 255, cv2.THRESH_BINARY)
+        return binary
 
-    # Extract raw grayscales safely
-    grayL = extract_composite(manualMaskL)
-    grayR = extract_composite(manualMaskR)
+    # 3. Extract independently! (This fixes the "never changes again" bug)
+    new_mergedL = get_binary_from_editor(manualMaskL, baseL)
+    new_mergedR = get_binary_from_editor(manualMaskR, baseR)
 
-    if grayL is None or grayR is None:
+    # If somehow both bases are missing, abort
+    if new_mergedL is None or new_mergedR is None:
         return None, None, None, None, None, None
 
-    # Process original Merged masks
-    mergedL_np = np.array(mergedMaskL)
-    mergedR_np = np.array(mergedMaskR)
-
-    if len(mergedL_np.shape) == 3:
-        mergedL_np = cv2.cvtColor(mergedL_np, cv2.COLOR_RGB2GRAY)
-    if len(mergedR_np.shape) == 3:
-        mergedR_np = cv2.cvtColor(mergedR_np, cv2.COLOR_RGB2GRAY)
-
-    # Resize BEFORE thresholding using INTER_NEAREST
-    if grayL.shape != mergedL_np.shape:
-        grayL = cv2.resize(grayL, (mergedL_np.shape[1], mergedL_np.shape[0]), interpolation=cv2.INTER_NEAREST)
-    if grayR.shape != mergedR_np.shape:
-        grayR = cv2.resize(grayR, (mergedR_np.shape[1], mergedR_np.shape[0]), interpolation=cv2.INTER_NEAREST)
-
-    # Threshold
-    _, binaryL = cv2.threshold(grayL, 1, 255, cv2.THRESH_BINARY)
-    _, binaryR = cv2.threshold(grayR, 1, 255, cv2.THRESH_BINARY)
-
-    # FIX 2: Aggressive copying to ensure memory references never overlap
-    new_mergedL = binaryL.copy()
-    new_mergedR = binaryR.copy()
-
-    # Pass COPIES to postprocess_mask so it cannot mutate new_mergedL/R under the hood
+    # 4. Pass COPIES to your postprocessor so memory isn't overwritten
     pL, pR, gallery_list, preview_path = postprocess_mask(
         new_mergedL.copy(), new_mergedR.copy(), mask_dilate, mask_erode
     )
 
-    # Convert safely to PIL
+    # 5. Convert back to PIL
     mergedL_pil = Image.fromarray(new_mergedL).convert("L")
     mergedR_pil = Image.fromarray(new_mergedR).convert("L")
 
     return mergedL_pil, mergedR_pil, pL, pR, gallery_list, preview_path
-
 
 def merge_add_mask(maskL, maskR, mergedMaskL, mergedMaskR, dilate, erode):
     if maskL is not None and mergedMaskL is not None:
@@ -1617,7 +1594,7 @@ with gr.Blocks() as demo:
             manualMaskL = gr.ImageEditor(
                 elem_id="editor_left",
                 value=None,
-                type="numpy",
+                type="pil",
                 format="png",
                 image_mode="L",
                 layers=False,
@@ -1628,7 +1605,7 @@ with gr.Blocks() as demo:
             manualMaskR = gr.ImageEditor(
                 elem_id="editor_right",
                 value=None,
-                type="numpy",
+                type="pil",
                 format="png",
                 image_mode="L",
                 layers=False,
