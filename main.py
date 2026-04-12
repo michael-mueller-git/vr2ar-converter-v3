@@ -1583,7 +1583,7 @@ with gr.Blocks() as demo:
                 type="numpy",
                 format="png",
                 image_mode="RGB",
-                show_layers=False,
+                layers=False,
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
             )
             manualMaskR = gr.ImageEditor(
@@ -1591,7 +1591,7 @@ with gr.Blocks() as demo:
                 type="numpy",
                 format="png",
                 image_mode="RGB",
-                show_layers=False,
+                layers=False,
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
             )
         with gr.Row():
