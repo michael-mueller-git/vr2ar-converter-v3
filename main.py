@@ -1178,9 +1178,16 @@ def postprocess_mask(maskL, maskR, dilate, erode):
 def load_manual_mask(mergedMaskL, mergedMaskR):
     if mergedMaskL is None or mergedMaskR is None:
         return None, None
-    backgroundL = np.array(mergedMaskL)
-    backgroundR = np.array(mergedMaskR)
-    return backgroundL, backgroundR
+    bg_l = np.array(mergedMaskL)
+    bg_r = np.array(mergedMaskR)
+
+    # Convert to grayscale if needed (ImageEditor now uses mode "L")
+    if len(bg_l.shape) == 3:
+        bg_l = cv2.cvtColor(bg_l, cv2.COLOR_RGB2GRAY)
+    if len(bg_r.shape) == 3:
+        bg_r = cv2.cvtColor(bg_r, cv2.COLOR_RGB2GRAY)
+
+    return bg_l, bg_r
 
 
 def apply_manual_mask(
@@ -1203,37 +1210,68 @@ def apply_manual_mask(
         final_image = None
         if isinstance(editor_data, dict):
             print(f"DEBUG: editor_data keys: {list(editor_data.keys())}")
-            # Gradio ImageEditor typically provides a 'composite' image which is the result of background + layers
-            if "composite" in editor_data and editor_data["composite"] is not None:
-                print("DEBUG: Using 'composite' from editor_data")
-                final_image = editor_data["composite"]
-            else:
-                print(
-                    "DEBUG: 'composite' not found, attempting to merge background and layers"
-                )
-                background = editor_data.get("background")
-                layers = editor_data.get("layers")
-                if background is None:
-                    print("DEBUG: background is None")
-                    return None
 
-                # Start with background
+            background = editor_data.get("background")
+            layers = editor_data.get("layers", [])
+            composite = editor_data.get("composite")
+
+            print(
+                f"DEBUG: background: {type(background)}, shape: {background.shape if background is not None else None}"
+            )
+            print(
+                f"DEBUG: layers: {type(layers)}, count: {len(layers) if layers else 0}"
+            )
+            print(
+                f"DEBUG: composite: {type(composite)}, shape: {composite.shape if composite is not None else None}"
+            )
+
+            # Always manually merge background + layers to capture user edits
+            combined = None
+
+            if background is not None:
                 combined = background.copy()
-                if layers:
-                    print(f"DEBUG: merging {len(layers)} layers")
-                    for i, layer in enumerate(layers):
-                        # layers are typically dicts with 'image' and 'opacity'
-                        layer_img = layer.get("image")
-                        if layer_img is not None:
-                            # Simple additive merge for masks
-                            # If layer_img is the same size as combined
-                            if layer_img.shape == combined.shape:
-                                combined = np.maximum(combined, layer_img)
+                print(f"DEBUG: Starting with background shape: {combined.shape}")
+
+            if layers:
+                print(f"DEBUG: merging {len(layers)} layers")
+                for i, layer in enumerate(layers):
+                    print(f"DEBUG: processing layer {i}, type: {type(layer)}")
+                    if isinstance(layer, dict):
+                        print(f"DEBUG: layer {i} keys: {list(layer.keys())}")
+                    layer_img = layer.get("image") if isinstance(layer, dict) else layer
+                    if layer_img is not None:
+                        print(f"DEBUG: layer {i} shape: {layer_img.shape}")
+                        if combined is None:
+                            combined = layer_img.copy()
+                        elif layer_img.shape == combined.shape:
+                            # Handle RGBA layers
+                            if len(layer_img.shape) == 3 and layer_img.shape[2] == 4:
+                                alpha = layer_img[:, :, 3:].astype(float) / 255.0
+                                foreground = layer_img[:, :, :3].astype(float)
+                                background_arr = combined.astype(float)
+                                blended = (
+                                    alpha * foreground + (1 - alpha) * background_arr
+                                ).astype(np.uint8)
+                                combined = blended
                             else:
-                                print(
-                                    f"DEBUG: layer {i} size {layer_img.shape} mismatch with combined {combined.shape}"
-                                )
+                                # For RGB, use maximum (painting mode)
+                                combined = np.maximum(combined, layer_img)
+                        else:
+                            print(
+                                f"DEBUG: layer {i} size {layer_img.shape} mismatch with combined {combined.shape}"
+                            )
+
+            # Use combined if we built it, otherwise fall back to composite
+            if combined is not None:
                 final_image = combined
+                print(f"DEBUG: Using merged result, shape: {final_image.shape}")
+            elif composite is not None:
+                final_image = composite
+                print(f"DEBUG: Using composite, shape: {final_image.shape}")
+            else:
+                print("DEBUG: No background, layers, or composite found")
+                return None
+
         elif isinstance(editor_data, np.ndarray):
             print(f"DEBUG: editor_data is np.ndarray with shape {editor_data.shape}")
             final_image = editor_data
@@ -1254,6 +1292,9 @@ def apply_manual_mask(
             if final_image.shape[2] == 3:
                 print("DEBUG: Converting RGB to GRAY")
                 gray = cv2.cvtColor(final_image, cv2.COLOR_RGB2GRAY)
+                print(
+                    f"DEBUG: gray shape: {gray.shape}, max: {np.max(gray)}, min: {np.min(gray)}, unique values: {len(np.unique(gray))}"
+                )
             else:
                 print(f"DEBUG: Unexpected channel count: {final_image.shape[2]}")
                 gray = final_image
@@ -1261,7 +1302,7 @@ def apply_manual_mask(
             print("DEBUG: final_image is already grayscale or unexpected shape")
             gray = final_image
 
-        _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+        _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
         print(
             f"DEBUG: binary mask created. shape: {binary.shape}, max: {np.max(binary)}, min: {np.min(binary)}"
         )
@@ -1671,19 +1712,17 @@ with gr.Blocks() as demo:
                 value=None,
                 type="numpy",
                 format="png",
-                image_mode="RGB",
+                image_mode="L",
                 layers=False,
-                brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
-                eraser=True,
+                eraser=gr.Eraser(),
             )
             manualMaskR = gr.ImageEditor(
                 value=None,
                 type="numpy",
                 format="png",
-                image_mode="RGB",
+                image_mode="L",
                 layers=False,
-                brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
-                eraser=True,
+                eraser=gr.Eraser(),
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
