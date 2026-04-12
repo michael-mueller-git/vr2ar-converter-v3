@@ -1176,38 +1176,65 @@ def postprocess_mask(maskL, maskR, dilate, erode):
 
 
 def load_manual_mask(mergedMaskL, mergedMaskR):
-    return mergedMaskL, mergedMaskR
+    if mergedMaskL is None or mergedMaskR is None:
+        return None, None
+    backgroundL = np.array(mergedMaskL)
+    backgroundR = np.array(mergedMaskR)
+    return backgroundL, backgroundR
 
 
-def apply_manual_mask(manualMaskL, manualMaskR, mask_dilate, mask_erode):
-    if manualMaskL is None or manualMaskR is None:
+def apply_manual_mask(
+    manualMaskL, manualMaskR, mergedMaskL, mergedMaskR, mask_dilate, mask_erode
+):
+    if (
+        manualMaskL is None
+        or manualMaskR is None
+        or mergedMaskL is None
+        or mergedMaskR is None
+    ):
         return None, None, None, None, None, None
 
-    def extract_image(data):
-        if isinstance(data, dict):
-            return data.get("composite")
-        return data
-
-    def ensure_gray(img):
-        img = extract_image(img)
-        if img is None:
+    def process_editor_data(editor_data):
+        if editor_data is None:
             return None
-        if len(img.shape) == 3:
-            return cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        return img
+        if isinstance(editor_data, dict):
+            background = editor_data.get("background")
+            if background is None:
+                return None
+            if len(background.shape) == 3 and background.shape[2] == 4:
+                background = background[:, :, :3]
+            gray = cv2.cvtColor(background, cv2.COLOR_RGB2GRAY)
+            _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+            return binary
+        if isinstance(editor_data, np.ndarray):
+            if len(editor_data.shape) == 3 and editor_data.shape[2] == 4:
+                editor_data = editor_data[:, :, :3]
+            if len(editor_data.shape) == 3:
+                gray = cv2.cvtColor(editor_data, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = editor_data
+            _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+            return binary
+        return None
 
-    grayL = ensure_gray(manualMaskL)
-    grayR = ensure_gray(manualMaskR)
+    binaryL = process_editor_data(manualMaskL)
+    binaryR = process_editor_data(manualMaskR)
 
-    if grayL is None or grayR is None:
+    if binaryL is None or binaryR is None:
         return None, None, None, None, None, None
 
-    mergedL_pil = Image.fromarray(grayL).convert("L")
-    mergedR_pil = Image.fromarray(grayR).convert("L")
+    mergedL_np = np.array(mergedMaskL)
+    mergedR_np = np.array(mergedMaskR)
+
+    new_mergedL = cv2.bitwise_or(mergedL_np, binaryL)
+    new_mergedR = cv2.bitwise_or(mergedR_np, binaryR)
 
     pL, pR, gallery_list, preview_path = postprocess_mask(
-        grayL, grayR, mask_dilate, mask_erode
+        new_mergedL, new_mergedR, mask_dilate, mask_erode
     )
+
+    mergedL_pil = Image.fromarray(new_mergedL).convert("L")
+    mergedR_pil = Image.fromarray(new_mergedR).convert("L")
 
     return mergedL_pil, mergedR_pil, pL, pR, gallery_list, preview_path
 
@@ -1556,12 +1583,16 @@ with gr.Blocks() as demo:
                 type="numpy",
                 format="png",
                 image_mode="RGB",
+                show_layers=False,
+                brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
             )
             manualMaskR = gr.ImageEditor(
                 value=None,
                 type="numpy",
                 format="png",
                 image_mode="RGB",
+                show_layers=False,
+                brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
@@ -1627,7 +1658,14 @@ with gr.Blocks() as demo:
         )
         apply_manual_button.click(
             fn=apply_manual_mask,
-            inputs=[manualMaskL, manualMaskR, mask_dilate, mask_erode],
+            inputs=[
+                manualMaskL,
+                manualMaskR,
+                mergedMaskL,
+                mergedMaskR,
+                mask_dilate,
+                mask_erode,
+            ],
             outputs=[
                 mergedMaskL,
                 mergedMaskR,
