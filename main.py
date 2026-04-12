@@ -1174,25 +1174,21 @@ def postprocess_mask(maskL, maskR, dilate, erode):
 
     return maskL, maskR, generate_gallery_list(), os.path.join("previews", frame_name)
 
-
 def load_manual_mask(mergedMaskL, mergedMaskR):
-    if mergedMaskL is None or mergedMaskR is None:
-        return None, None
-    bg_l = np.array(mergedMaskL)
-    bg_r = np.array(mergedMaskR)
-
-    # Convert to grayscale if needed (ImageEditor now uses mode "L")
-    if len(bg_l.shape) == 3:
-        bg_l = cv2.cvtColor(bg_l, cv2.COLOR_RGB2GRAY)
-    if len(bg_r.shape) == 3:
-        bg_r = cv2.cvtColor(bg_r, cv2.COLOR_RGB2GRAY)
-
-    return bg_l, bg_r
+    def process_to_rgb(mask):
+        if mask is None:
+            return None
+        arr = np.array(mask)
+        # Ensure it's converted to an RGB array so Gradio's editor works perfectly
+        if len(arr.shape) == 2:
+            arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
+        return Image.fromarray(arr).convert("RGB")
+    
+    return process_to_rgb(mergedMaskL), process_to_rgb(mergedMaskR)
 
 def apply_manual_mask(
     manualMaskL, manualMaskR, mergedMaskL, mergedMaskR, mask_dilate, mask_erode
 ):
-    # 1. Prepare the base fallbacks independently
     baseL = np.array(mergedMaskL) if mergedMaskL is not None else None
     baseR = np.array(mergedMaskR) if mergedMaskR is not None else None
 
@@ -1201,52 +1197,52 @@ def apply_manual_mask(
     if baseR is not None and len(baseR.shape) == 3:
         baseR = cv2.cvtColor(baseR, cv2.COLOR_RGB2GRAY)
 
-    # 2. Safe extraction function
     def get_binary_from_editor(editor_data, base_arr):
-        if base_arr is None:
-            return None
-            
-        # If the user hasn't drawn anything, return the base mask
-        if editor_data is None or not isinstance(editor_data, dict):
-            _, bin_base = cv2.threshold(base_arr, 1, 255, cv2.THRESH_BINARY)
-            return bin_base.copy()
-            
-        composite = editor_data.get("composite")
-        if composite is None:
-            _, bin_base = cv2.threshold(base_arr, 1, 255, cv2.THRESH_BINARY)
-            return bin_base.copy()
-            
-        # Convert PIL Image to Numpy safely (Fixes upside-down & coordinate bugs)
-        if hasattr(composite, 'convert'):
-            comp_np = np.array(composite.convert("L"))
-        else:
-            # Fallback just in case it's still numpy
-            comp_np = composite.copy()
-            if len(comp_np.shape) == 3:
-                comp_np = cv2.cvtColor(comp_np, cv2.COLOR_RGB2GRAY)
+        if editor_data is not None and isinstance(editor_data, dict):
+            composite = editor_data.get("composite")
+            if composite is not None:
+                # Convert back to grayscale purely in Python
+                if hasattr(composite, 'convert'):
+                    comp_np = np.array(composite.convert("L"))
+                else:
+                    comp_np = composite.copy()
+                    if len(comp_np.shape) == 3:
+                        comp_np = cv2.cvtColor(comp_np, cv2.COLOR_RGB2GRAY)
                 
-        # Force resize to match the original merged mask perfectly (Fixes cropping)
-        h, w = base_arr.shape[:2]
-        if comp_np.shape[:2] != (h, w):
-            comp_np = cv2.resize(comp_np, (w, h), interpolation=cv2.INTER_NEAREST)
-            
-        _, binary = cv2.threshold(comp_np, 1, 255, cv2.THRESH_BINARY)
-        return binary
+                _, binary = cv2.threshold(comp_np, 1, 255, cv2.THRESH_BINARY)
 
-    # 3. Extract independently! (This fixes the "never changes again" bug)
+                # Fixes cropping: forces the drawing to scale back to original dimensions
+                if base_arr is not None:
+                    h, w = base_arr.shape[:2]
+                    if binary.shape[:2] != (h, w):
+                        binary = cv2.resize(binary, (w, h), interpolation=cv2.INTER_NEAREST)
+                return binary
+        
+        # Fallback to the original base if user didn't draw anything
+        if base_arr is not None:
+            _, bin_base = cv2.threshold(base_arr, 1, 255, cv2.THRESH_BINARY)
+            return bin_base.copy()
+        
+        return None
+
     new_mergedL = get_binary_from_editor(manualMaskL, baseL)
     new_mergedR = get_binary_from_editor(manualMaskR, baseR)
 
-    # If somehow both bases are missing, abort
-    if new_mergedL is None or new_mergedR is None:
-        return None, None, None, None, None, None
+    # If both failed or are empty, use gr.skip() so it doesn't break the UI
+    if new_mergedL is None and new_mergedR is None:
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
 
-    # 4. Pass COPIES to your postprocessor so memory isn't overwritten
+    # If one is empty, initialize it to black so postprocess_mask doesn't crash
+    if new_mergedL is None and new_mergedR is not None:
+        new_mergedL = np.zeros_like(new_mergedR)
+    if new_mergedR is None and new_mergedL is not None:
+        new_mergedR = np.zeros_like(new_mergedL)
+
+    # Pass deep copies to ensure L and R never overwrite each other in memory
     pL, pR, gallery_list, preview_path = postprocess_mask(
         new_mergedL.copy(), new_mergedR.copy(), mask_dilate, mask_erode
     )
 
-    # 5. Convert back to PIL
     mergedL_pil = Image.fromarray(new_mergedL).convert("L")
     mergedR_pil = Image.fromarray(new_mergedR).convert("L")
 
@@ -1593,25 +1589,27 @@ with gr.Blocks() as demo:
         with gr.Row():
             manualMaskL = gr.ImageEditor(
                 elem_id="editor_left",
+                label="Left Mask Editor",
                 value=None,
                 type="pil",
                 format="png",
-                image_mode="L",
+                image_mode="RGB",  # FIX: Forces bug-free RGB canvas in the browser
                 layers=False,
                 eraser=gr.Eraser(),
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
-                transforms = [],
+                transforms=(),     # FIX: Disables auto-crop entirely
             )
             manualMaskR = gr.ImageEditor(
                 elem_id="editor_right",
+                label="Right Mask Editor",
                 value=None,
                 type="pil",
                 format="png",
-                image_mode="L",
+                image_mode="RGB",  # FIX: Forces bug-free RGB canvas in the browser
                 layers=False,
                 eraser=gr.Eraser(),
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
-                transforms = [],
+                transforms=(),     # FIX: Disables auto-crop entirely
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
