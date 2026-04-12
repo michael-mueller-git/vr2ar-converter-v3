@@ -1226,6 +1226,17 @@ def apply_manual_mask(
     mergedL_np = np.array(mergedMaskL)
     mergedR_np = np.array(mergedMaskR)
 
+    if binaryL.shape != mergedL_np.shape:
+        print(
+            f"WARNING: Manual mask L size {binaryL.shape} != merged mask size {mergedL_np.shape}, resizing..."
+        )
+        binaryL = cv2.resize(binaryL, (mergedL_np.shape[1], mergedL_np.shape[0]))
+    if binaryR.shape != mergedR_np.shape:
+        print(
+            f"WARNING: Manual mask R size {binaryR.shape} != merged mask size {mergedR_np.shape}, resizing..."
+        )
+        binaryR = cv2.resize(binaryR, (mergedR_np.shape[1], mergedR_np.shape[0]))
+
     new_mergedL = cv2.bitwise_or(mergedL_np, binaryL)
     new_mergedR = cv2.bitwise_or(mergedR_np, binaryR)
 
@@ -1578,14 +1589,14 @@ with gr.Blocks() as demo:
         with gr.Row():
             load_manual_button = gr.Button("Load Merged Mask")
         with gr.Row():
-            manualMaskL = gr.ImageEditor(
+manualMaskL = gr.ImageEditor(
                 value=None,
                 type="numpy",
                 format="png",
                 image_mode="RGB",
                 layers=False,
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
-                eraser=False
+                eraser=True
             )
             manualMaskR = gr.ImageEditor(
                 value=None,
@@ -1594,7 +1605,7 @@ with gr.Blocks() as demo:
                 image_mode="RGB",
                 layers=False,
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
-                eraser=False
+                eraser=True
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
