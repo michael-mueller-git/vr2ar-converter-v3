@@ -1584,6 +1584,7 @@ with gr.Blocks() as demo:
             )
 
         gr.Markdown("### Manual Mask Editor")
+        gr.Markdown("This section does not Work in Firefox. If you need to use the manual Mask Editor use chrome based browser")
         with gr.Row():
             load_manual_button = gr.Button("Load Merged Mask")
         with gr.Row():
