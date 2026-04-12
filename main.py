@@ -1189,7 +1189,6 @@ def load_manual_mask(mergedMaskL, mergedMaskR):
 
     return bg_l, bg_r
 
-
 def apply_manual_mask(
     manualMaskL, manualMaskR, mergedMaskL, mergedMaskR, mask_dilate, mask_erode
 ):
@@ -1211,9 +1210,17 @@ def apply_manual_mask(
         if composite is None:
             return None
 
-        # FIX: If Gradio captured the canvas at UI scale, resize it to match the true background size
+        # FIX 1: Gradio ImageEditor "Upside Down" Bug. Flip it vertically to correct it.
+        # If your image turns upside down again in a future Gradio update, just remove this line.
+        composite = cv2.flip(composite, 0) 
+
+        # Correct dimension resizing based on original background (solves 400px cropping)
         if background is not None and composite.shape[:2] != background.shape[:2]:
-            composite = cv2.resize(composite, (background.shape[1], background.shape[0]), interpolation=cv2.INTER_NEAREST)
+            composite = cv2.resize(
+                composite, 
+                (background.shape[1], background.shape[0]), 
+                interpolation=cv2.INTER_NEAREST
+            )
 
         # Handle color/alpha channels properly
         if len(composite.shape) == 3:
@@ -1226,14 +1233,14 @@ def apply_manual_mask(
             
         return gray
 
-    # Extract raw grayscales first
+    # Extract raw grayscales safely
     grayL = extract_composite(manualMaskL)
     grayR = extract_composite(manualMaskR)
 
     if grayL is None or grayR is None:
         return None, None, None, None, None, None
 
-    # Ensure target dimensions are extracted from the original merged masks
+    # Process original Merged masks
     mergedL_np = np.array(mergedMaskL)
     mergedR_np = np.array(mergedMaskR)
 
@@ -1242,30 +1249,31 @@ def apply_manual_mask(
     if len(mergedR_np.shape) == 3:
         mergedR_np = cv2.cvtColor(mergedR_np, cv2.COLOR_RGB2GRAY)
 
-    # FIX: Resize BEFORE thresholding, and use INTER_NEAREST so mask edges stay sharp
+    # Resize BEFORE thresholding using INTER_NEAREST
     if grayL.shape != mergedL_np.shape:
         grayL = cv2.resize(grayL, (mergedL_np.shape[1], mergedL_np.shape[0]), interpolation=cv2.INTER_NEAREST)
     if grayR.shape != mergedR_np.shape:
         grayR = cv2.resize(grayR, (mergedR_np.shape[1], mergedR_np.shape[0]), interpolation=cv2.INTER_NEAREST)
 
-    # FIX: Threshold AFTER resize to clean up the mask
+    # Threshold
     _, binaryL = cv2.threshold(grayL, 1, 255, cv2.THRESH_BINARY)
     _, binaryR = cv2.threshold(grayR, 1, 255, cv2.THRESH_BINARY)
 
-    # Use .copy() to ensure L and R are strictly independent in memory
+    # FIX 2: Aggressive copying to ensure memory references never overlap
     new_mergedL = binaryL.copy()
     new_mergedR = binaryR.copy()
 
-    # Apply your post-processing
+    # Pass COPIES to postprocess_mask so it cannot mutate new_mergedL/R under the hood
     pL, pR, gallery_list, preview_path = postprocess_mask(
-        new_mergedL, new_mergedR, mask_dilate, mask_erode
+        new_mergedL.copy(), new_mergedR.copy(), mask_dilate, mask_erode
     )
 
-    # Convert back to PIL
+    # Convert safely to PIL
     mergedL_pil = Image.fromarray(new_mergedL).convert("L")
     mergedR_pil = Image.fromarray(new_mergedR).convert("L")
 
     return mergedL_pil, mergedR_pil, pL, pR, gallery_list, preview_path
+
 
 def merge_add_mask(maskL, maskR, mergedMaskL, mergedMaskR, dilate, erode):
     if maskL is not None and mergedMaskL is not None:
@@ -1607,6 +1615,7 @@ with gr.Blocks() as demo:
             load_manual_button = gr.Button("Load Merged Mask")
         with gr.Row():
             manualMaskL = gr.ImageEditor(
+                elem_id="editor_left",
                 value=None,
                 type="numpy",
                 format="png",
@@ -1617,6 +1626,7 @@ with gr.Blocks() as demo:
                 transforms = [],
             )
             manualMaskR = gr.ImageEditor(
+                elem_id="editor_right",
                 value=None,
                 type="numpy",
                 format="png",
