@@ -1585,6 +1585,7 @@ with gr.Blocks() as demo:
                 image_mode="RGB",
                 layers=False,
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
+                eraser=False
             )
             manualMaskR = gr.ImageEditor(
                 value=None,
@@ -1593,6 +1594,7 @@ with gr.Blocks() as demo:
                 image_mode="RGB",
                 layers=False,
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
+                eraser=False
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
