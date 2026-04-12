@@ -1589,7 +1589,7 @@ with gr.Blocks() as demo:
         with gr.Row():
             load_manual_button = gr.Button("Load Merged Mask")
         with gr.Row():
-manualMaskL = gr.ImageEditor(
+            manualMaskL = gr.ImageEditor(
                 value=None,
                 type="numpy",
                 format="png",
