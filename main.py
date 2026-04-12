@@ -1201,163 +1201,42 @@ def apply_manual_mask(
     ):
         return None, None, None, None, None, None
 
-    def process_editor_data(editor_data):
-        print(f"DEBUG: process_editor_data input type: {type(editor_data)}")
+    def extract_composite(editor_data):
         if editor_data is None:
-            print("DEBUG: editor_data is None")
             return None
-
-        final_image = None
         if isinstance(editor_data, dict):
-            print(f"DEBUG: editor_data keys: {list(editor_data.keys())}")
-
-            background = editor_data.get("background")
-            layers = editor_data.get("layers", [])
             composite = editor_data.get("composite")
-
-            print(
-                f"DEBUG: background: {type(background)}, shape: {background.shape if background is not None else None}"
-            )
-            print(
-                f"DEBUG: layers: {type(layers)}, count: {len(layers) if layers else 0}"
-            )
-            print(
-                f"DEBUG: composite: {type(composite)}, shape: {composite.shape if composite is not None else None}"
-            )
-
-            # Always manually merge background + layers to capture user edits
-            combined = None
-
-            if background is not None:
-                combined = background.copy()
-                print(f"DEBUG: Starting with background shape: {combined.shape}")
-
-            if layers:
-                print(f"DEBUG: merging {len(layers)} layers")
-                for i, layer in enumerate(layers):
-                    print(f"DEBUG: processing layer {i}, type: {type(layer)}")
-                    if isinstance(layer, dict):
-                        print(f"DEBUG: layer {i} keys: {list(layer.keys())}")
-                    layer_img = layer.get("image") if isinstance(layer, dict) else layer
-                    if layer_img is not None:
-                        print(f"DEBUG: layer {i} shape: {layer_img.shape}")
-                        if combined is None:
-                            combined = layer_img.copy()
-                        elif layer_img.shape == combined.shape:
-                            # Handle RGBA layers
-                            if len(layer_img.shape) == 3 and layer_img.shape[2] == 4:
-                                alpha = layer_img[:, :, 3:].astype(float) / 255.0
-                                foreground = layer_img[:, :, :3].astype(float)
-                                background_arr = combined.astype(float)
-                                blended = (
-                                    alpha * foreground + (1 - alpha) * background_arr
-                                ).astype(np.uint8)
-                                combined = blended
-                            else:
-                                # For RGB, use maximum (painting mode)
-                                combined = np.maximum(combined, layer_img)
-                        else:
-                            print(
-                                f"DEBUG: layer {i} size {layer_img.shape} mismatch with combined {combined.shape}"
-                            )
-
-            # Use combined if we built it, otherwise fall back to composite
-            if combined is not None:
-                final_image = combined
-                print(f"DEBUG: Using merged result, shape: {final_image.shape}")
-            elif composite is not None:
-                final_image = composite
-                print(f"DEBUG: Using composite, shape: {final_image.shape}")
-            else:
-                print("DEBUG: No background, layers, or composite found")
+            if composite is None:
                 return None
-
-        elif isinstance(editor_data, np.ndarray):
-            print(f"DEBUG: editor_data is np.ndarray with shape {editor_data.shape}")
-            final_image = editor_data
-        else:
-            print(f"DEBUG: Unsupported editor_data type: {type(editor_data)}")
-            return None
-
-        if final_image is None:
-            print("DEBUG: final_image is None")
-            return None
-
-        # Handle RGBA/RGB
-        if len(final_image.shape) == 3:
-            if final_image.shape[2] == 4:
-                print("DEBUG: Converting RGBA to RGB")
-                final_image = final_image[:, :, :3]
-
-            if final_image.shape[2] == 3:
-                print("DEBUG: Converting RGB to GRAY")
-                gray = cv2.cvtColor(final_image, cv2.COLOR_RGB2GRAY)
-                print(
-                    f"DEBUG: gray shape: {gray.shape}, max: {np.max(gray)}, min: {np.min(gray)}, unique values: {len(np.unique(gray))}"
-                )
+            if len(composite.shape) == 3 and composite.shape[2] in (3, 4):
+                gray = cv2.cvtColor(composite[:, :, :3], cv2.COLOR_RGB2GRAY)
             else:
-                print(f"DEBUG: Unexpected channel count: {final_image.shape[2]}")
-                gray = final_image
-        else:
-            print("DEBUG: final_image is already grayscale or unexpected shape")
-            gray = final_image
+                gray = composite
+            _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+            return binary
+        return None
 
-        _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
-        print(
-            f"DEBUG: binary mask created. shape: {binary.shape}, max: {np.max(binary)}, min: {np.min(binary)}"
-        )
-        return binary
-
-    print(
-        f"DEBUG: apply_manual_mask called. L: {type(manualMaskL)}, R: {type(manualMaskR)}"
-    )
-    binaryL = process_editor_data(manualMaskL)
-    binaryR = process_editor_data(manualMaskR)
-
-    print(
-        f"DEBUG: binaryL shape: {binaryL.shape if binaryL is not None else 'None'}, binaryR shape: {binaryR.shape if binaryR is not None else 'None'}"
-    )
+    binaryL = extract_composite(manualMaskL)
+    binaryR = extract_composite(manualMaskR)
 
     if binaryL is None or binaryR is None:
-        print("DEBUG: binaryL or binaryR is None, returning None")
         return None, None, None, None, None, None
 
     mergedL_np = np.array(mergedMaskL)
     mergedR_np = np.array(mergedMaskR)
 
-    print(
-        f"DEBUG: mergedL_np shape: {mergedL_np.shape}, mergedR_np shape: {mergedR_np.shape}"
-    )
-
     if len(mergedL_np.shape) == 3:
-        print("DEBUG: mergedL_np is 3D, converting to GRAY")
         mergedL_np = cv2.cvtColor(mergedL_np, cv2.COLOR_RGB2GRAY)
     if len(mergedR_np.shape) == 3:
-        print("DEBUG: mergedR_np is 3D, converting to GRAY")
         mergedR_np = cv2.cvtColor(mergedR_np, cv2.COLOR_RGB2GRAY)
 
-    print(
-        f"DEBUG: mergedL_np shape after conversion: {mergedL_np.shape}, mergedR_np shape after conversion: {mergedR_np.shape}"
-    )
-
     if binaryL.shape != mergedL_np.shape:
-        print(
-            f"WARNING: Manual mask L size {binaryL.shape} != merged mask size {mergedL_np.shape}, resizing..."
-        )
         binaryL = cv2.resize(binaryL, (mergedL_np.shape[1], mergedL_np.shape[0]))
     if binaryR.shape != mergedR_np.shape:
-        print(
-            f"WARNING: Manual mask R size {binaryR.shape} != merged mask size {mergedR_np.shape}, resizing..."
-        )
         binaryR = cv2.resize(binaryR, (mergedR_np.shape[1], mergedR_np.shape[0]))
 
-    # Now we use the result of process_editor_data which should already be a merge of background + layers
     new_mergedL = binaryL
     new_mergedR = binaryR
-
-    print(
-        f"DEBUG: Final merged masks shapes: L {new_mergedL.shape}, R {new_mergedR.shape}"
-    )
 
     pL, pR, gallery_list, preview_path = postprocess_mask(
         new_mergedL, new_mergedR, mask_dilate, mask_erode
@@ -1715,6 +1594,7 @@ with gr.Blocks() as demo:
                 image_mode="L",
                 layers=False,
                 eraser=gr.Eraser(),
+                brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
             )
             manualMaskR = gr.ImageEditor(
                 value=None,
@@ -1723,6 +1603,7 @@ with gr.Blocks() as demo:
                 image_mode="L",
                 layers=False,
                 eraser=gr.Eraser(),
+                brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
