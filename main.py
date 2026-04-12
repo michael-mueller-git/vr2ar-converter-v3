@@ -1202,26 +1202,38 @@ def apply_manual_mask(
         return None, None, None, None, None, None
 
     def extract_composite(editor_data):
-        if editor_data is None:
+        if editor_data is None or not isinstance(editor_data, dict):
             return None
-        if isinstance(editor_data, dict):
-            composite = editor_data.get("composite")
-            if composite is None:
-                return None
-            if len(composite.shape) == 3 and composite.shape[2] in (3, 4):
-                gray = cv2.cvtColor(composite[:, :, :3], cv2.COLOR_RGB2GRAY)
-            else:
-                gray = composite
-            _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
-            return binary
-        return None
+            
+        composite = editor_data.get("composite")
+        background = editor_data.get("background")
+        
+        if composite is None:
+            return None
 
-    binaryL = extract_composite(manualMaskL)
-    binaryR = extract_composite(manualMaskR)
+        # FIX: If Gradio captured the canvas at UI scale, resize it to match the true background size
+        if background is not None and composite.shape[:2] != background.shape[:2]:
+            composite = cv2.resize(composite, (background.shape[1], background.shape[0]), interpolation=cv2.INTER_NEAREST)
 
-    if binaryL is None or binaryR is None:
+        # Handle color/alpha channels properly
+        if len(composite.shape) == 3:
+            if composite.shape[2] == 4:  # Image has Alpha Channel (RGBA)
+                gray = cv2.cvtColor(composite, cv2.COLOR_RGBA2GRAY)
+            else:  # Image is RGB
+                gray = cv2.cvtColor(composite, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = composite.copy()
+            
+        return gray
+
+    # Extract raw grayscales first
+    grayL = extract_composite(manualMaskL)
+    grayR = extract_composite(manualMaskR)
+
+    if grayL is None or grayR is None:
         return None, None, None, None, None, None
 
+    # Ensure target dimensions are extracted from the original merged masks
     mergedL_np = np.array(mergedMaskL)
     mergedR_np = np.array(mergedMaskR)
 
@@ -1230,23 +1242,30 @@ def apply_manual_mask(
     if len(mergedR_np.shape) == 3:
         mergedR_np = cv2.cvtColor(mergedR_np, cv2.COLOR_RGB2GRAY)
 
-    if binaryL.shape != mergedL_np.shape:
-        binaryL = cv2.resize(binaryL, (mergedL_np.shape[1], mergedL_np.shape[0]))
-    if binaryR.shape != mergedR_np.shape:
-        binaryR = cv2.resize(binaryR, (mergedR_np.shape[1], mergedR_np.shape[0]))
+    # FIX: Resize BEFORE thresholding, and use INTER_NEAREST so mask edges stay sharp
+    if grayL.shape != mergedL_np.shape:
+        grayL = cv2.resize(grayL, (mergedL_np.shape[1], mergedL_np.shape[0]), interpolation=cv2.INTER_NEAREST)
+    if grayR.shape != mergedR_np.shape:
+        grayR = cv2.resize(grayR, (mergedR_np.shape[1], mergedR_np.shape[0]), interpolation=cv2.INTER_NEAREST)
 
-    new_mergedL = binaryL
-    new_mergedR = binaryR
+    # FIX: Threshold AFTER resize to clean up the mask
+    _, binaryL = cv2.threshold(grayL, 1, 255, cv2.THRESH_BINARY)
+    _, binaryR = cv2.threshold(grayR, 1, 255, cv2.THRESH_BINARY)
 
+    # Use .copy() to ensure L and R are strictly independent in memory
+    new_mergedL = binaryL.copy()
+    new_mergedR = binaryR.copy()
+
+    # Apply your post-processing
     pL, pR, gallery_list, preview_path = postprocess_mask(
         new_mergedL, new_mergedR, mask_dilate, mask_erode
     )
 
+    # Convert back to PIL
     mergedL_pil = Image.fromarray(new_mergedL).convert("L")
     mergedR_pil = Image.fromarray(new_mergedR).convert("L")
 
     return mergedL_pil, mergedR_pil, pL, pR, gallery_list, preview_path
-
 
 def merge_add_mask(maskL, maskR, mergedMaskL, mergedMaskR, dilate, erode):
     if maskL is not None and mergedMaskL is not None:
@@ -1595,6 +1614,7 @@ with gr.Blocks() as demo:
                 layers=False,
                 eraser=gr.Eraser(),
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
+                transforms = [],
             )
             manualMaskR = gr.ImageEditor(
                 value=None,
@@ -1604,6 +1624,7 @@ with gr.Blocks() as demo:
                 layers=False,
                 eraser=gr.Eraser(),
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
+                transforms = [],
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
