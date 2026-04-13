@@ -1,20 +1,40 @@
 # VR2AR Converter 3
 
-Convert your adult VR Videos into Passthrough AR Videos.
+Convert your adult VR Videos into Passthrough AR Videos using advanced background removal.
 
-- Difference to https://github.com/michael-mueller-git/vr2ar-converter is other platform (docker) and used method. v1 and v2 have some mask merge jitter problems which i solved in v3 by using a custom  ArVideoWriter. Due to the diffrent programming languages in v1 vs v3 i can not backport this fix to v1. Therefore i recommend to use v3.
-- Difference to https://github.com/michael-mueller-git/vr2ar-converter-v2 is this container uses more modern models for background removal ([MatAnyone](https://github.com/pq-yang/MatAnyone)). This repo therefore replaces v2.
+## Project Evolution
+- **Difference from v1**: v3 solves mask merge jitter problems by implementing a custom `ArVideoWriter`. See [vr2ar-converter](https://github.com/michael-mueller-git/vr2ar-converter).
+- **Difference from v2**: v3 uses more modern models for background removal ([MatAnyone](https://github.com/pq-yang/MatAnyone)) and replaces the v2 container. See [vr2ar-converter-v2](https://github.com/michael-mueller-git/vr2ar-converter-v2).
 
-Use the provided container and deploy on device with nvida gpu. Then use the buildin `grad.io` webui to convert your videos.
+## Deployment
 
-## Highlevel Usage
+The only supported deployment method is via Docker to ensure all CUDA, FFmpeg, and model dependencies are correctly bundled.
 
-1. Create smal video chunks you want to convert to passthrough with no scene changes (i recommend chunks with length smaler than 3 minutes)
-2. Process these chunks via the provided gradio webui
-3. Wait for complete of process.
-4. Download the result
-5. Combine your chunks back into on video
+### 1. Setup Configuration
+Depending on your Docker/NVIDIA setup (CDI vs standard), you may need to use either the `cuda1` or `cuda2` example. Copy the appropriate one for your hardware:
+```bash
+cp docker-compose.cuda1.yaml.example docker-compose.yaml
+# OR (for CDI setups)
+cp docker-compose.cuda2.yaml.example docker-compose.yaml
+```
 
-## TODO
+### 2. Run the Application
+Deploy using Docker Compose:
+```bash
+docker compose up -d
+```
 
-- Some output resolution cause slightly shifted mask. Analyse this fi this is an ffmpeg merge problem
+## Usage
+
+1. **Upload**: Upload your VR video chunks (recommended length < 3 minutes).
+2. **Configuration**: Select the source projection (e.g., Equirectangular `eq`) and adjust the mask size based on your available VRAM (e.g., 1440px requires ~20GB).
+3. **Masking**: 
+   - Extract projection frames.
+   - Generate initial masks using text prompts or point selections.
+   - Refine masks using the "add" or "subtract" tools.
+4. **Process**: Add the video to the job queue. The system will propagate the mask temporally and merge the result.
+5. **Download**: Download the converted AR video once processing is complete.
+
+## Requirements
+- NVIDIA GPU with CUDA support.
+- Docker and NVIDIA Container Toolkit.

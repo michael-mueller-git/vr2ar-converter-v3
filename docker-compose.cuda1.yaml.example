@@ -16,3 +16,4 @@ services:
     volumes:
     - ./jobs:/jobs
     - ./process:/app/process
+    - ./output:/app/output

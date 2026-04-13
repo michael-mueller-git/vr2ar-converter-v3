@@ -55,8 +55,13 @@ SECONDS = 10
 WARMUP = 4
 JOB_VERSION = 6
 SSIM_THRESHOLD = float(os.environ.get("SSIM_THRESHOLD", "0.983"))
+# ... (keep existing imports)
+# ...
+# around line 58
 MODELS_DIR = "/app/model"
+OUTPUT_DIR = "/app/output"
 DEFAULT_MODEL = "MatAnyone 2"
+# ...
 MODEL_NAMES = ["MatAnyone 2", "MatAnyone"]
 MODEL_FILE_MAPPING = {"MatAnyone": "matanyone.pth", "MatAnyone 2": "matanyone2.pth"}
 DEBUG = False
@@ -1174,6 +1179,7 @@ def postprocess_mask(maskL, maskR, dilate, erode):
 
     return maskL, maskR, generate_gallery_list(), os.path.join("previews", frame_name)
 
+
 def load_manual_mask(mergedMaskL, mergedMaskR):
     def process_to_rgb(mask):
         if mask is None:
@@ -1183,8 +1189,9 @@ def load_manual_mask(mergedMaskL, mergedMaskR):
         if len(arr.shape) == 2:
             arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
         return Image.fromarray(arr).convert("RGB")
-    
+
     return process_to_rgb(mergedMaskL), process_to_rgb(mergedMaskR)
+
 
 def apply_manual_mask(
     manualMaskL, manualMaskR, mergedMaskL, mergedMaskR, mask_dilate, mask_erode
@@ -1202,27 +1209,29 @@ def apply_manual_mask(
             composite = editor_data.get("composite")
             if composite is not None:
                 # Convert back to grayscale purely in Python
-                if hasattr(composite, 'convert'):
+                if hasattr(composite, "convert"):
                     comp_np = np.array(composite.convert("L"))
                 else:
                     comp_np = composite.copy()
                     if len(comp_np.shape) == 3:
                         comp_np = cv2.cvtColor(comp_np, cv2.COLOR_RGB2GRAY)
-                
+
                 _, binary = cv2.threshold(comp_np, 1, 255, cv2.THRESH_BINARY)
 
                 # Fixes cropping: forces the drawing to scale back to original dimensions
                 if base_arr is not None:
                     h, w = base_arr.shape[:2]
                     if binary.shape[:2] != (h, w):
-                        binary = cv2.resize(binary, (w, h), interpolation=cv2.INTER_NEAREST)
+                        binary = cv2.resize(
+                            binary, (w, h), interpolation=cv2.INTER_NEAREST
+                        )
                 return binary
-        
+
         # Fallback to the original base if user didn't draw anything
         if base_arr is not None:
             _, bin_base = cv2.threshold(base_arr, 1, 255, cv2.THRESH_BINARY)
             return bin_base.copy()
-        
+
         return None
 
     new_mergedL = get_binary_from_editor(manualMaskL, baseL)
@@ -1247,6 +1256,7 @@ def apply_manual_mask(
     mergedR_pil = Image.fromarray(new_mergedR).convert("L")
 
     return mergedL_pil, mergedR_pil, pL, pR, gallery_list, preview_path
+
 
 def merge_add_mask(maskL, maskR, mergedMaskL, mergedMaskR, dilate, erode):
     if maskL is not None and mergedMaskL is not None:
@@ -1584,7 +1594,9 @@ with gr.Blocks() as demo:
             )
 
         gr.Markdown("### Manual Mask Editor")
-        gr.Markdown("This section does not Work in Firefox. If you need to use the manual Mask Editor use chrome based browser")
+        gr.Markdown(
+            "This section does not Work in Firefox. If you need to use the manual Mask Editor use chrome based browser"
+        )
         with gr.Row():
             load_manual_button = gr.Button("Load Merged Mask")
         with gr.Row():
@@ -1598,7 +1610,7 @@ with gr.Blocks() as demo:
                 layers=False,
                 eraser=gr.Eraser(),
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
-                transforms=(),     # FIX: Disables auto-crop entirely
+                transforms=(),  # FIX: Disables auto-crop entirely
             )
             manualMaskR = gr.ImageEditor(
                 elem_id="editor_right",
@@ -1610,7 +1622,7 @@ with gr.Blocks() as demo:
                 layers=False,
                 eraser=gr.Eraser(),
                 brush=gr.Brush(colors=["#FFFFFF", "#000000"]),
-                transforms=(),     # FIX: Disables auto-crop entirely
+                transforms=(),  # FIX: Disables auto-crop entirely
             )
         with gr.Row():
             apply_manual_button = gr.Button("Apply Manual Mask")
