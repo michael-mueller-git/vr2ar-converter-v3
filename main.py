@@ -55,9 +55,6 @@ SECONDS = 10
 WARMUP = 4
 JOB_VERSION = 6
 SSIM_THRESHOLD = float(os.environ.get("SSIM_THRESHOLD", "0.983"))
-# ... (keep existing imports)
-# ...
-# around line 58
 MODELS_DIR = "/app/model"
 OUTPUT_DIR = "/app/output"
 DEFAULT_MODEL = "MatAnyone 2"
