@@ -47,7 +47,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /tmp
 
-RUN wget -O ffmpeg.tar.xz \
+ARG CACHE_BUST=1
+
+RUN echo $CACHE_BUST && wget -O ffmpeg.tar.xz \
     https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
     && tar -xJf ffmpeg.tar.xz \
     && mv -f ffmpeg-*-amd64-static/ffmpeg /usr/local/bin/ \
