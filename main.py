@@ -578,7 +578,7 @@ def process_with_reverse_tracking(
         "-i",
         '"' + str(video) + '"',
         "-f",
-        "image2pipe",
+        "rawvideo",
         "-pix_fmt",
         "bgr24",
         "-fps_mode",
