@@ -629,6 +629,10 @@ def process_with_reverse_tracking(
         "-crf", str(crf),
         "-preset", "veryfast",
         "-c:a", "copy",
+
+        # FIX: Explicitly specify the output framerate to prevent fallback to 25fps
+        "-r", str(video_info.fps),
+
         f'"{result_name}"'
     ]
 
