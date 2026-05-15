@@ -578,16 +578,16 @@ def process_with_reverse_tracking(
 # This forces Frame 1 of Video to rigidly lock to Frame 1 of the Masks
     fc += f"[bg]setpts=N/FRAME_RATE/TB[bg_sync]; "
     fc += f"[1:v]setpts=N/FRAME_RATE/TB[mask_seq_sync]; "
+    fc += f"[2:v]setpts=N/FRAME_RATE/TB[mask_static_sync]; "
 
 # 4. Scale masks and apply the static 'mask.png'
     fc += f"[mask_seq_sync]scale=iw*{scale}:-1[alpha_scaled]; "
-    fc += f"[2:v][alpha_scaled]scale2ref[mask_scaled][alpha_ref]; "
+    fc += f"[mask_static_sync][alpha_scaled]scale2ref[mask_scaled][alpha_ref]; "
     fc += f"[alpha_ref][mask_scaled]alphamerge,split=2[masked_alpha1][masked_alpha2]; "
 
-# 5. FIX DEADLOCK: Add 'fifo' buffers to split branches to prevent filter locks
-    fc += f"[masked_alpha1]crop=iw/2:ih:0:0,split=2[l1][l2_pre]; [l2_pre]fifo[l2]; "
-    fc += f"[masked_alpha2]crop=iw/2:ih:iw/2:0,split=4[r1][r2_pre][r3_pre][r4_pre]; "
-    fc += f"[r2_pre]fifo[r2]; [r3_pre]fifo[r3]; [r4_pre]fifo[r4]; "
+# 5. Split branches (FFmpeg 7.0+ handles buffering automatically, no 'fifo' needed)
+    fc += f"[masked_alpha1]crop=iw/2:ih:0:0,split=2[l1][l2]; "
+    fc += f"[masked_alpha2]crop=iw/2:ih:iw/2:0,split=4[r1][r2][r3][r4]; "
 
 # 6. Cascaded Overlays (eof_action=pass ensures completion if masks drop early)
     fc += f"[bg_sync][l1]overlay=W*0.5-w*0.5:-0.5*h:eof_action=pass[out_lt]; "
@@ -604,6 +604,7 @@ def process_with_reverse_tracking(
         "-hide_banner",
         "-loglevel", "warning",
         "-hwaccel", "auto",
+        
         # Input 0: The Original Video
         "-i", f'"{video}"',
         
@@ -613,6 +614,7 @@ def process_with_reverse_tracking(
         
         # Input 2: Static mask image (MUST loop to prevent stopping at frame 1)
         "-loop", "1",
+        "-framerate", str(video_info.fps),
         "-i", '"mask.png"',
         
         # Apply unified filtergraph
