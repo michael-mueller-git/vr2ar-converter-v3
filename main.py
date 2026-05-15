@@ -581,7 +581,7 @@ def process_with_reverse_tracking(
         "image2pipe",
         "-pix_fmt",
         "bgr24",
-        "-vsync",
+        "-fps_mode",
         "passthrough",
         "-vcodec",
         "rawvideo",
