@@ -185,7 +185,7 @@ def main():
             '"' + result_name + '"',
             "-y",
         ]
-    else if method == 1:
+    elif method == 1:
         fc = ""
         if eq2fisheye:
             fc += f"[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; "
@@ -231,7 +231,7 @@ def main():
             
             # Input 1: Mask image sequence (forced to matching video fps)
             "-framerate", str(video_info.fps),
-            "-i", '"process/masks/%06d.png"',
+            "-i", mask_seq,
             
             # Input 2: Static mask image (MUST loop to prevent stopping at frame 1)
             "-loop", "1",
@@ -256,6 +256,8 @@ def main():
 
             f'"{result_name}"'
         ]
+    else:
+        print("ERROR: method", method, "not implemented")
 
     print(" ".join(cmd))
     subprocess.run(" ".join(cmd), shell=True)
