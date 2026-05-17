@@ -58,10 +58,7 @@ RUN wget -O /tmp/nix-installer \
 ENV PATH="${PATH}:/nix/var/nix/profiles/default/bin"
 COPY ffmpeg/flake.nix ffmpeg/flake.lock /app/ffmpeg/
 
-ARG CACHE_BUST=1
-
-RUN echo $CACHE_BUST \
-    && nix profile install /app/ffmpeg#ffmpeg \
+RUN nix profile install /app/ffmpeg#ffmpeg \
     && rm -f /usr/bin/ffmpeg /usr/bin/ffprobe
 
 WORKDIR /app
