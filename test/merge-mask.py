@@ -31,9 +31,12 @@ def get_video_info(path):
         capture_output=True, text=True,
     )
     num, den = result.stdout.strip().split("/")
-    fps = round(float(num) / float(den))
+    fps = float(float(num) / float(den))
+    
+    # NEW: Keep the exact fractional string (e.g., "30000/1001", "25/1")
+    fps_str = f"{num}/{den}"
 
-    return type("VideoInfo", (), {"width": width, "height": height, "fps": fps})()
+    return type("VideoInfo", (), {"width": width, "height": height, "fps": fps, "fps_str": fps_str})()
 
 
 def get_first_mask(mask_dir):
@@ -196,17 +199,17 @@ def main():
             fc += f"[0:v]scale={out_resolution}[bg]; "
 
 # 3. Strict Frame-to-Frame Sync Guarantee (Overrides VFR drift)
-# This forces Frame 1 of Video to rigidly lock to Frame 1 of the Masks
-        fc += f"[bg]setpts=N/FRAME_RATE/TB[bg_sync]; "
-        fc += f"[1:v]setpts=N/FRAME_RATE/TB[mask_seq_sync]; "
-        fc += f"[2:v]setpts=N/FRAME_RATE/TB[mask_static_sync]; "
+# Use the exact fractional framerate rather than FRAME_RATE to guarantee mathematically perfect sync!
+        fc += f"[bg]setpts=N/({video_info.fps_str})/TB[bg_sync]; "
+        fc += f"[1:v]setpts=N/({video_info.fps_str})/TB[mask_seq_sync]; "
+        fc += f"[2:v]setpts=N/({video_info.fps_str})/TB[mask_static_sync]; "
 
-# 4. Scale masks and apply the static 'mask.png'
+# 4. Scale masks and apply the static 'first mask'
         fc += f"[mask_seq_sync]scale=iw*{scale}:-1[alpha_scaled]; "
         fc += f"[mask_static_sync][alpha_scaled]scale2ref[mask_scaled][alpha_ref]; "
         fc += f"[alpha_ref][mask_scaled]alphamerge,split=2[masked_alpha1][masked_alpha2]; "
 
-# 5. Split branches (FFmpeg 7.0+ handles buffering automatically, no 'fifo' needed)
+# 5. Split branches
         fc += f"[masked_alpha1]crop=iw/2:ih:0:0,split=2[l1][l2]; "
         fc += f"[masked_alpha2]crop=iw/2:ih:iw/2:0,split=4[r1][r2][r3][r4]; "
 
@@ -229,14 +232,14 @@ def main():
             # Input 0: The Original Video
             "-i", f'"{video}"',
             
-            # Input 1: Mask image sequence (forced to matching video fps)
-            "-framerate", str(video_info.fps),
-            "-i", mask_seq,
+            # Input 1: Mask image sequence (forced to exact matching video fps fraction)
+            "-framerate", video_info.fps_str,
+            "-i", f'"{mask_seq}"',
             
-            # Input 2: Static mask image (MUST loop to prevent stopping at frame 1)
+            # Input 2: Static mask image (Using variable correctly now)
             "-loop", "1",
-            "-framerate", str(video_info.fps),
-            "-i", '"mask.png"',
+            "-framerate", video_info.fps_str,
+            "-i", f'"{first_mask_path}"',
             
             # Apply unified filtergraph
             "-filter_complex", f'"{fc}"',
@@ -251,11 +254,11 @@ def main():
             "-preset", "veryfast",
             "-c:a", "copy",
 
-            # FIX: Explicitly specify the output framerate to prevent fallback to 25fps
-            "-r", str(video_info.fps),
+            # FIX: Explicitly specify the exact output framerate string
+            "-r", video_info.fps_str,
 
             f'"{result_name}"'
-        ]
+        ]    
     else:
         print("ERROR: method", method, "not implemented")
 
