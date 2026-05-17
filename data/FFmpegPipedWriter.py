@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import shutil
 import cv2
+import psutil
 import shlex
 
 try:
@@ -173,20 +174,49 @@ class FFmpegPipedWriter:
             os.chmod(script_path, 0o755)
 
             print(f"Starting direct ffmpeg pipeline for {self.video_path}")
-            result = subprocess.run(
+            self.process = subprocess.Popen(
                 ["bash", script_path],
-                capture_output=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 text=True,
             )
 
-            if result.returncode != 0:
-                print(f"Pipeline failed with return code {result.returncode}")
+            pid = self.process.pid
+            proc = psutil.Process(pid)
+            low_cpu_since = None
+            CPU_THRESHOLD = 25.0
+            CPU_TIMEOUT = 30
+
+            while True:
+                ret = self.process.poll()
+                if ret is not None:
+                    break
+
+                cpu = proc.cpu_percent(interval=1)
+                if cpu < CPU_THRESHOLD:
+                    if low_cpu_since is None:
+                        low_cpu_since = time.time()
+                    elif time.time() - low_cpu_since >= CPU_TIMEOUT:
+                        print(f"CPU stalled: below {CPU_THRESHOLD}% for {CPU_TIMEOUT} seconds (current: {cpu:.1f}%)")
+                        self.process.kill()
+                        self.process.wait()
+                        self.error = f"CPU stalled: below {CPU_THRESHOLD}% for {CPU_TIMEOUT} seconds"
+                        break
+                else:
+                    low_cpu_since = None
+
+            if self.process.returncode is not None and self.process.returncode != 0:
+                print(f"Pipeline failed with return code {self.process.returncode}")
+                stderr_out = self.process.stderr.read() if self.process.stderr else ""
+                if stderr_out:
+                    print(stderr_out[:1000])
                 for name, path in [("decode", decode_log), ("encode", encode_log)]:
                     if os.path.exists(path) and os.path.getsize(path) > 0:
                         with open(path) as f:
                             print(f"--- {name} stderr log ---")
                             print(f.read()[:1000])
-                self.error = f"ffmpeg returned {result.returncode}"
+                if not self.error:
+                    self.error = f"ffmpeg returned {self.process.returncode}"
             else:
                 print("Pipeline completed successfully")
 
@@ -196,6 +226,9 @@ class FFmpegPipedWriter:
             traceback.print_exc()
             self.error = str(e)
         finally:
+            if hasattr(self, 'process') and self.process is not None and self.process.returncode is None:
+                self.process.kill()
+                self.process.wait()
             if tmp_dir and os.path.exists(tmp_dir):
                 shutil.rmtree(tmp_dir, ignore_errors=True)
             self.completed = True

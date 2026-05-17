@@ -19,3 +19,4 @@ transformers==4.51.3
 requests
 filebrowser-client
 scikit-image
+psutil
