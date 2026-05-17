@@ -678,12 +678,12 @@ def add_job(
     video,
     projection,
     crf,
+    ar_writer,
     erode,
     forceInitMask,
     video_output_height,
     keep_eq,
     model_selection,
-    ar_writer,
 ):
     RETURN_VALUES = 16
     if video is None:
