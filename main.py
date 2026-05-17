@@ -45,6 +45,7 @@ from hydra.core.global_hydra import GlobalHydra
 from data.ffmpegstream import FFmpegStream
 from data.ArVideoWriter import ArVideoWriter
 from data.ArVideo import ArVideoWriterWrapper
+from data.ArVideo import ArVideoWriterDirect
 from video_process import ImageFrame
 from filebrowser_client import FilebrowserClient
 
@@ -318,7 +319,9 @@ def process_with_reverse_tracking(
     os.makedirs("process/debug", exist_ok=True)
     reverse_track = False
 
+    # TODO make selectable
     ar_writer = ArVideoWriterWrapper(video, "process/masks", output_height, not keepEq and "eq" == projection, crf)
+    # ar_writer = ArVideoWriterDirect(video, "process/masks", output_height, not keepEq and "eq" == projection, crf)
     WORKER_STATUS = "Process Video..."
     while ffmpeg.isOpen():
         img = ffmpeg.read()
