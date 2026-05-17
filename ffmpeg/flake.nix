@@ -12,10 +12,11 @@
         pkgs = import nixpkgs { inherit system; };
       in
       {
+        packages.ffmpeg = pkgs.ffmpeg;
+        packages.default = pkgs.ffmpeg;
+
         devShells.default = pkgs.mkShell {
-          buildInputs = [
-            pkgs.ffmpeg
-          ];
+          buildInputs = [ pkgs.ffmpeg ];
         };
       }
     );
