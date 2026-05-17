@@ -7,14 +7,18 @@ import subprocess
 from threading import Thread
 from queue import Queue
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, ".", "data")
+try:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.join(BASE_DIR, ".", "data")
 
-if os.path.isdir(DATA_DIR) and DATA_DIR not in sys.path:
-    sys.path.append(DATA_DIR)
+    if os.path.isdir(DATA_DIR) and DATA_DIR not in sys.path:
+        sys.path.append(DATA_DIR)
 
-from ffmpegstream import VideoInfo, FFmpegStream
-from ArVideoWriter import ArVideoWriter
+    from ffmpegstream import VideoInfo, FFmpegStream
+    from ArVideoWriter import ArVideoWriter
+except:
+    from data.ffmpegstream import VideoInfo, FFmpegStream
+    from data.ArVideoWriter import ArVideoWriter
 
 
 class ArVideoWriterWrapper:
