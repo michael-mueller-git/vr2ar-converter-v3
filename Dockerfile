@@ -61,11 +61,8 @@ COPY ffmpeg/flake.nix ffmpeg/flake.lock /app/ffmpeg/
 ARG CACHE_BUST=1
 
 RUN echo $CACHE_BUST \
-    && nix build /app/ffmpeg#ffmpeg \
-    && rm -f /usr/bin/ffmpeg /usr/bin/ffprobe \
-    && ln -s "$(readlink -f result)/bin/ffmpeg" /usr/local/bin/ffmpeg \
-    && ln -s "$(readlink -f result)/bin/ffprobe" /usr/local/bin/ffprobe \
-    && rm result
+    && nix profile install /app/ffmpeg#ffmpeg \
+    && rm -f /usr/bin/ffmpeg /usr/bin/ffprobe
 
 WORKDIR /app
 COPY . /app
