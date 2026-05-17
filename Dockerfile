@@ -55,10 +55,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/
 ENV PATH="${PATH}:/nix/var/nix/profiles/default/bin"
 COPY ffmpeg/flake.nix ffmpeg/flake.lock /app/ffmpeg/
 
-ARG CACHE_BUST=1
-
-RUN echo $CACHE_BUST \
-    && nix develop /app/ffmpeg --command bash -c ' \
+RUN nix develop /app/ffmpeg --command bash -c ' \
         ln -s "$(command -v ffmpeg)" /usr/local/bin/ffmpeg && \
         ln -s "$(command -v ffprobe)" /usr/local/bin/ffprobe'
 
