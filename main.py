@@ -44,6 +44,7 @@ from hydra.core.global_hydra import GlobalHydra
 
 from data.ffmpegstream import FFmpegStream
 from data.ArVideoWriter import ArVideoWriter
+from data.ArVideo import ArVideoWriterWrapper
 from video_process import ImageFrame
 from filebrowser_client import FilebrowserClient
 
@@ -317,6 +318,7 @@ def process_with_reverse_tracking(
     os.makedirs("process/debug", exist_ok=True)
     reverse_track = False
 
+    ar_writer = ArVideoWriterWrapper(video, "process/masks", output_height, not keepEq and "eq" == projection, crf)
     WORKER_STATUS = "Process Video..."
     while ffmpeg.isOpen():
         img = ffmpeg.read()
@@ -334,6 +336,7 @@ def process_with_reverse_tracking(
         if force_init_mask and current_frame == 1:
             frame_match = True
 
+        end_sequence = False
         if maskIdx < len(masks):
             s1 = ssim(
                 masks[maskIdx]["frameLGray"], cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY)
@@ -349,6 +352,8 @@ def process_with_reverse_tracking(
                 print("ssim2", s2)
                 if s2 > SSIM_THRESHOLD:
                     frame_match = True
+        else:
+            end_sequence = True
 
         imgLV = prepare_frame(imgL)
         imgRV = prepare_frame(imgR)
@@ -523,6 +528,7 @@ def process_with_reverse_tracking(
                     )
 
             print("reverse tracking of", subprocess_len, "completed")
+            ar_writer.set_batch(current_frame)
             # set model state to forware tracking again
             imgLMask = fix_mask2(masks[maskIdx - 1]["maskL"])
             imgRMask = fix_mask2(masks[maskIdx - 1]["maskR"])
@@ -531,6 +537,9 @@ def process_with_reverse_tracking(
             for _ in range(WARMUP):
                 output_prob_L = processor1.step(imgLV_end)
                 output_prob_R = processor2.step(imgRV_end)
+
+        if end_sequence:
+            ar_writer.set_batch(current_frame)
 
         gc.collect()
 
@@ -547,103 +556,15 @@ def process_with_reverse_tracking(
         torch.cuda.empty_cache()
 
     ffmpeg.stop()
-
     gc.collect()
+    ar_writer.set_batch(current_frame)
+    ar_writer.set_end()
 
-    WORKER_STATUS = f"Create Mask Video..."
-    print("create Video", result_name)
+    print("Wait for AR Writer stop...")
+    while not ar_writer.is_finished():
+        time.sleep(1)
 
-# 1. Determine Resolution
-    out_resolution = f"{video_info.width}:{video_info.height}"
-    scale = video_info.height / mask_h * 0.4
-    if output_height > 0:
-        out_w = int(output_height * 2)
-        out_h = int(output_height)
-        scale = out_h / mask_h * 0.4
-        out_resolution = f"{out_w}:{out_h}"
-        print("use custom output resolution", out_resolution)
-
-    fc = ""
-
-# 2. Base Video Projection and Scaling
-    if not keepEq and "eq" == projection:
-        fc += f"[0:v]split=2[left][right]; [left]crop=ih:ih:0:0[left_crop]; [right]crop=ih:ih:ih:0[right_crop]; "
-        fc += f"[left_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[leftfisheye]; "
-        fc += f"[right_crop]v360=hequirect:fisheye:iv_fov=180:ih_fov=180:v_fov=180:h_fov=180[rightfisheye]; "
-        fc += f"[leftfisheye][rightfisheye]hstack,scale={out_resolution}[bg]; "
-    else:
-        fc += f"[0:v]scale={out_resolution}[bg]; "
-
-# 3. Strict Frame-to-Frame Sync Guarantee (Overrides VFR drift)
-# This forces Frame 1 of Video to rigidly lock to Frame 1 of the Masks
-    fc += f"[bg]setpts=N/FRAME_RATE/TB[bg_sync]; "
-    fc += f"[1:v]setpts=N/FRAME_RATE/TB[mask_seq_sync]; "
-    fc += f"[2:v]setpts=N/FRAME_RATE/TB[mask_static_sync]; "
-
-# 4. Scale masks and apply the static 'mask.png'
-    fc += f"[mask_seq_sync]scale=iw*{scale}:-1[alpha_scaled]; "
-    fc += f"[mask_static_sync][alpha_scaled]scale2ref[mask_scaled][alpha_ref]; "
-    fc += f"[alpha_ref][mask_scaled]alphamerge,split=2[masked_alpha1][masked_alpha2]; "
-
-# 5. Split branches (FFmpeg 7.0+ handles buffering automatically, no 'fifo' needed)
-    fc += f"[masked_alpha1]crop=iw/2:ih:0:0,split=2[l1][l2]; "
-    fc += f"[masked_alpha2]crop=iw/2:ih:iw/2:0,split=4[r1][r2][r3][r4]; "
-
-# 6. Cascaded Overlays (eof_action=pass ensures completion if masks drop early)
-    fc += f"[bg_sync][l1]overlay=W*0.5-w*0.5:-0.5*h:eof_action=pass[out_lt]; "
-    fc += f"[out_lt][l2]overlay=W*0.5-w*0.5:H-0.5*h:eof_action=pass[out_tb]; "
-    fc += f"[out_tb][r1]overlay=0-w*0.5:-0.5*h:eof_action=pass[out_l_lt]; "
-    fc += f"[out_l_lt][r2]overlay=0-w*0.5:H-0.5*h:eof_action=pass[out_tb_ltb]; "
-    fc += f"[out_tb_ltb][r3]overlay=W-w*0.5:-0.5*h:eof_action=pass[out_r_lt]; "
-    fc += f"[out_r_lt][r4]overlay=W-w*0.5:H-0.5*h:eof_action=pass[out]"
-
-# 7. Single FFmpeg Command Execution
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-loglevel", "warning",
-        "-hwaccel", "auto",
-        
-        # Input 0: The Original Video
-        "-i", f'"{video}"',
-        
-        # Input 1: Mask image sequence (forced to matching video fps)
-        "-framerate", str(video_info.fps),
-        "-i", '"process/masks/%06d.png"',
-        
-        # Input 2: Static mask image (MUST loop to prevent stopping at frame 1)
-        "-loop", "1",
-        "-framerate", str(video_info.fps),
-        "-i", '"mask.png"',
-        
-        # Apply unified filtergraph
-        "-filter_complex", f'"{fc}"',
-        
-        # Map video from filtergraph, Map audio from Input 0
-        "-map", '"[out]"',
-        "-map", '"0:a?"',
-        
-        # Output Settings
-        "-c:v", "libx265",
-        "-crf", str(crf),
-        "-preset", "veryfast",
-        "-c:a", "copy",
-
-        # FIX: Explicitly specify the output framerate to prevent fallback to 25fps
-        "-r", str(video_info.fps),
-
-        f'"{result_name}"'
-    ]
-
-    if DEBUG:
-        print(" ".join(cmd))
-
-# Execute the combined process
-    subprocess.run(" ".join(cmd), shell=True)
-
-# Clean up
-    shutil.rmtree("process/masks", ignore_errors=True)
+    os.rename(ar_writer.get_video_path(), result_name)
 
     WORKER_STATUS = f"Convertion completed"
     return result_name

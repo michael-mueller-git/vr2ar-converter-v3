@@ -23,12 +23,6 @@ def main(video, mask_dir, output_height, eq2fisheye, crf):
         out_h = int(output_height)
         print("use custom output resolution", f"{out_w}:{out_h}")
 
-    masks = sorted(f for f in os.listdir(mask_dir) if f.endswith(".png"))
-    if not masks:
-        print("no mask files found")
-        return
-    mask_h = cv2.imread(os.path.join(mask_dir, masks[0]), cv2.IMREAD_UNCHANGED).shape[0]
-
     config = {"parameter": {"width": out_w, "height": out_h}}
     if eq2fisheye:
         config["filter_complex"] = (
