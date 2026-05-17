@@ -44,8 +44,8 @@ from hydra.core.global_hydra import GlobalHydra
 
 from data.ffmpegstream import FFmpegStream
 from data.ArVideoWriter import ArVideoWriter
-from data.ArVideo import ArVideoWriterWrapper
-from data.ArVideo import ArVideoWriterDirect
+from data.PythonVideoWriter import PythonVideoWriter
+from data.FFmpegPipedWriter import FFmpegPipedWriter
 from video_process import ImageFrame
 from filebrowser_client import FilebrowserClient
 
@@ -55,13 +55,15 @@ WORKER_STATUS = "Idle"
 MASK_SIZE = 1440
 SECONDS = 10
 WARMUP = 4
-JOB_VERSION = 6
+JOB_VERSION = 7
 SSIM_THRESHOLD = float(os.environ.get("SSIM_THRESHOLD", "0.983"))
 MODELS_DIR = "/app/model"
 OUTPUT_DIR = "/app/output"
 DEFAULT_MODEL = "MatAnyone 2"
 # ...
 MODEL_NAMES = ["MatAnyone 2", "MatAnyone"]
+AR_WRITER_NAMES = ["PythonVideoWriter", "FFmpegPipedWriter"]
+DEFAULT_AR_WRITER = "PythonVideoWriter"
 MODEL_FILE_MAPPING = {"MatAnyone": "matanyone.pth", "MatAnyone 2": "matanyone2.pth"}
 DEBUG = False
 MASK_DEBUG = os.environ.get("MASK_DEBUG", "False").lower() == "true"
@@ -245,6 +247,7 @@ def process_with_reverse_tracking(
     output_height=0,
     keepEq=False,
     model_selection=DEFAULT_MODEL,
+    ar_writer=DEFAULT_AR_WRITER,
 ):
     global WORKER_STATUS
     global DEVICE_JOB
@@ -319,9 +322,10 @@ def process_with_reverse_tracking(
     os.makedirs("process/debug", exist_ok=True)
     reverse_track = False
 
-    # TODO make selectable
-    ar_writer = ArVideoWriterWrapper(video, "process/masks", output_height, not keepEq and "eq" == projection, crf)
-    # ar_writer = ArVideoWriterDirect(video, "process/masks", output_height, not keepEq and "eq" == projection, crf)
+    if ar_writer == "FFmpegPipedWriter":
+        ar_writer_instance = FFmpegPipedWriter(video, "process/masks", output_height, not keepEq and "eq" == projection, crf)
+    else:
+        ar_writer_instance = PythonVideoWriter(video, "process/masks", output_height, not keepEq and "eq" == projection, crf)
     WORKER_STATUS = "Process Video..."
     while ffmpeg.isOpen():
         img = ffmpeg.read()
@@ -531,7 +535,7 @@ def process_with_reverse_tracking(
                     )
 
             print("reverse tracking of", subprocess_len, "completed")
-            ar_writer.set_batch(current_frame)
+            ar_writer_instance.set_batch(current_frame)
             # set model state to forware tracking again
             imgLMask = fix_mask2(masks[maskIdx - 1]["maskL"])
             imgRMask = fix_mask2(masks[maskIdx - 1]["maskR"])
@@ -542,7 +546,7 @@ def process_with_reverse_tracking(
                 output_prob_R = processor2.step(imgRV_end)
 
         if end_sequence:
-            ar_writer.set_batch(current_frame)
+            ar_writer_instance.set_batch(current_frame)
 
         gc.collect()
 
@@ -560,14 +564,14 @@ def process_with_reverse_tracking(
 
     ffmpeg.stop()
     gc.collect()
-    ar_writer.set_batch(current_frame)
-    ar_writer.set_end()
+    ar_writer_instance.set_batch(current_frame)
+    ar_writer_instance.set_end()
 
     print("Wait for AR Writer stop...")
-    while not ar_writer.is_finished():
+    while not ar_writer_instance.is_finished():
         time.sleep(1)
 
-    os.rename(ar_writer.get_video_path(), result_name)
+    os.rename(ar_writer_instance.get_video_path(), result_name)
 
     WORKER_STATUS = f"Convertion completed"
     return result_name
@@ -626,6 +630,7 @@ def background_worker():
                     job["outputHeight"],
                     job["keepEq"],
                     job["model_selection"],
+                    job.get("ar_writer", DEFAULT_AR_WRITER),
                 )
                 os.remove(video_path)
 
@@ -678,6 +683,7 @@ def add_job(
     video_output_height,
     keep_eq,
     model_selection,
+    ar_writer,
 ):
     RETURN_VALUES = 16
     if video is None:
@@ -736,6 +742,7 @@ def add_job(
             "outputHeight": video_output_height,
             "keepEq": keep_eq,
             "model_selection": model_selection,
+            "ar_writer": ar_writer,
         }
 
     pkl_path = f"/jobs/{ts}_{name}.pkl"
@@ -1693,6 +1700,12 @@ with gr.Blocks() as demo:
         crf_dropdown = gr.Dropdown(
             choices=[16, 17, 18, 19, 20, 21, 22], label="Encode CRF", value=16
         )
+        ar_writer_dropdown = gr.Dropdown(
+            choices=AR_WRITER_NAMES,
+            label="AR Writer Pipeline",
+            value=DEFAULT_AR_WRITER,
+            info="PythonVideoWriter uses Python-level blending this can cause color shift on 10 bit colored videos. But the implementation is more robust than the FFmpegPipedWriter impl; FFmpegPipedWriter uses pure ffmpeg filters but for some videos it can hang forever due to som unclear pipe deadlock error in ffmpeg",
+        )
         erode_checkbox = gr.Checkbox(label="Erode Mask Output", value=True, info="")
         force_init_mask_checkbox = gr.Checkbox(
             label="Force Init Mask (Not recommend!)", value=False, info=""
@@ -1711,6 +1724,7 @@ with gr.Blocks() as demo:
                 input_video,
                 projection_dropdown,
                 crf_dropdown,
+                ar_writer_dropdown,
                 erode_checkbox,
                 force_init_mask_checkbox,
                 output_resolution_height,

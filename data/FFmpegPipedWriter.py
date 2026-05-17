@@ -21,7 +21,7 @@ except:
     from data.ffmpegstream import VideoInfo, FFmpegStream
 
 
-class ArVideoWriterDirect:
+class FFmpegPipedWriter:
     def __init__(self, video, mask_dir, output_height, eq2fisheye, crf):
         self.video_path = video
         self.video_info = FFmpegStream.get_video_info(video)
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     parser.add_argument("--crf", type=int, default=16, help="libx265 CRF value")
     args = parser.parse_args()
 
-    ar_writer = ArVideoWriterDirect(args.video, args.mask_dir, args.output_height, args.eq2fisheye, args.crf)
+    ar_writer = FFmpegPipedWriter(args.video, args.mask_dir, args.output_height, args.eq2fisheye, args.crf)
     ar_writer.set_batch(args.batch)
     ar_writer.set_end()
     while not ar_writer.is_finished():
