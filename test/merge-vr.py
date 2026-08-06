@@ -61,12 +61,12 @@ def inverse_chain(proj, rect, scaling):
     if proj['type'] == "fisheye":
         fx = rect['x'] - proj['half_x']
         chain = (f"v360=input=flat:output=equirect:yaw={-proj['yaw']:.2f}:pitch={-proj['pitch']:.2f}:"
-                 f"ih_fov={proj['h_fov']:.2f}:iv_fov={proj['v_fov']:.2f}:w={proj['eq_w']}:h={proj['eq_h']},"
+                 f"ih_fov={proj['h_fov']:.2f}:iv_fov={proj['v_fov']:.2f}:w={proj['eq_w']}:h={proj['eq_h']}:alpha_mask=1,"
                  f"v360=input=equirect:output=fisheye:d_fov={proj['fov']}:w={proj['half_w']}:h={proj['half_h']},"
                  f"crop={rect['w']}:{rect['h']}:{fx}:{rect['y']}")
     else:
         chain = (f"v360=input=flat:output=equirect:yaw={-proj['yaw']:.2f}:pitch={-proj['pitch']:.2f}:"
-                 f"ih_fov={proj['h_fov']:.2f}:iv_fov={proj['v_fov']:.2f}:w={proj['frame_w']}:h={proj['frame_h']},"
+                 f"ih_fov={proj['h_fov']:.2f}:iv_fov={proj['v_fov']:.2f}:w={proj['frame_w']}:h={proj['frame_h']}:alpha_mask=1,"
                  f"crop={rect['w']}:{rect['h']}:{rect['x']}:{rect['y']}")
     return f"{chain},scale={ow}:{oh}"
 
