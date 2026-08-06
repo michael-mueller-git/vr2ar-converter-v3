@@ -5,18 +5,31 @@ import cv2
 
 parser = argparse.ArgumentParser(description="Merge Upscaled ROI into AR Video")
 parser.add_argument("src_video", type=str, help="ar src video file path")
-parser.add_argument("left_roi", type=str, help="left upscaled roi")
-parser.add_argument("right_roi", type=str, help="right upscaled roi")
+parser.add_argument("left_roi", type=str, nargs="?", help="left upscaled roi")
+parser.add_argument("right_roi", type=str, nargs="?", help="right upscaled roi")
+parser.add_argument("--sbs", type=str, help="combined sbs video instead of separate left/right rois")
 parser.add_argument("--height", type=int, default=4096, help="Target Video Resolution Height")
 args = parser.parse_args()
 
-left_config = os.path.splitext(os.path.basename(args.left_roi))[0]
-with open(f"{left_config}.json", "r") as f:
-    roi_left = json.load(f)
+def load_config(video):
+    config = os.path.splitext(os.path.basename(video))[0]
+    with open(f"{config}.json", "r") as f:
+        return json.load(f)
 
-right_config = os.path.splitext(os.path.basename(args.right_roi))[0]
-with open(f"{right_config}.json", "r") as f:
-    roi_right = json.load(f)
+sbs_mode = args.sbs is not None
+if sbs_mode:
+    if args.left_roi is not None or args.right_roi is not None:
+        parser.error("cannot combine --sbs with separate left/right roi arguments")
+    sbs_info = load_config(args.sbs)
+    roi_left = dict(sbs_info['views']['left']['source'])
+    roi_right = dict(sbs_info['views']['right']['source'])
+    sbs_left_rect = sbs_info['views']['left']
+    sbs_right_rect = sbs_info['views']['right']
+else:
+    if args.left_roi is None or args.right_roi is None:
+        parser.error("left_roi and right_roi are required unless --sbs is used")
+    roi_left = load_config(args.left_roi)
+    roi_right = load_config(args.right_roi)
 
 def get_resolution(video):
     cap = cv2.VideoCapture(args.src_video)
@@ -29,18 +42,6 @@ src_res = get_resolution(args.src_video)
 scaling = args.height / src_res[0]
 out_res = (round(src_res[0] * scaling), round(src_res[1] * scaling))
 
-def get_out_resolution(roi_info, roi_video):
-    h_old, w_old = roi_info["h"], roi_info["w"]
-    h_new, w_new = get_resolution(roi_video)
-    h_scaled = h_new / h_old
-    w_scaled = w_new / w_old
-    h_out = round(h_new / h_scaled * scaling)
-    w_out = round(w_new / w_scaled * scaling)
-    return (h_out, w_out)
-
-left_out_res = get_out_resolution(roi_left, args.left_roi)
-right_out_res = get_out_resolution(roi_right, args.right_roi)
-
 left_out_pos = (round(roi_left["x"] * scaling), round(roi_left["y"] * scaling))
 right_out_pos = (round(roi_right["x"] * scaling), round(roi_right["y"] * scaling))
 
@@ -52,18 +53,45 @@ if ext == ".jpg":
     # improve output quality
     ext = ".png"
 
-print("left res", left_out_res)
-print("right res", right_out_res)
-
 audio = "" if any(x == ext for x in [".png", ".jpg"]) else "-map 0:a -c:a copy"
 
-cmd = f"ffmpeg -i \"{args.src_video}\" -i \"{args.left_roi}\" -i \"{args.right_roi}\" -filter_complex \""
-cmd += f"[0:v]scale={out_res[1]}:{out_res[0]}[bg];"
-cmd += f"[1:v]scale={left_out_res[1]}:{left_out_res[0]}[ol];"
-cmd += f"[2:v]scale={right_out_res[1]}:{right_out_res[0]}[or];"
-cmd += f"[bg][ol]overlay={left_out_pos[0]}:{left_out_pos[1]}:format=auto[tmp];"
-cmd += f"[tmp][or]overlay={right_out_pos[0]}:{right_out_pos[1]}:format=auto[out]"
-cmd += f"\"  -map \"[out]\" {audio} \"{out_name}-merged{ext}\""
+if sbs_mode:
+    left_out_res = (round(roi_left["h"] * scaling), round(roi_left["w"] * scaling))
+    right_out_res = (round(roi_right["h"] * scaling), round(roi_right["w"] * scaling))
 
+    lx, ly, lw, lh = sbs_left_rect['x'], sbs_left_rect['y'], sbs_left_rect['w'], sbs_left_rect['h']
+    rx, ry, rw, rh = sbs_right_rect['x'], sbs_right_rect['y'], sbs_right_rect['w'], sbs_right_rect['h']
+
+    cmd = f"ffmpeg -i \"{args.src_video}\" -i \"{args.sbs}\" -filter_complex \""
+    cmd += f"[0:v]scale={out_res[1]}:{out_res[0]}[bg];"
+    cmd += f"[1:v]crop={lw}:{lh}:{lx}:{ly},scale={left_out_res[1]}:{left_out_res[0]}[ol];"
+    cmd += f"[1:v]crop={rw}:{rh}:{rx}:{ry},scale={right_out_res[1]}:{right_out_res[0]}[or];"
+    cmd += f"[bg][ol]overlay={left_out_pos[0]}:{left_out_pos[1]}:format=auto[tmp];"
+    cmd += f"[tmp][or]overlay={right_out_pos[0]}:{right_out_pos[1]}:format=auto[out]"
+    cmd += f"\"  -map \"[out]\" {audio} \"{out_name}-merged{ext}\""
+else:
+    def get_out_resolution(roi_info, roi_video):
+        h_old, w_old = roi_info["h"], roi_info["w"]
+        h_new, w_new = get_resolution(roi_video)
+        h_scaled = h_new / h_old
+        w_scaled = w_new / w_old
+        h_out = round(h_new / h_scaled * scaling)
+        w_out = round(w_new / w_scaled * scaling)
+        return (h_out, w_out)
+
+    left_out_res = get_out_resolution(roi_left, args.left_roi)
+    right_out_res = get_out_resolution(roi_right, args.right_roi)
+
+    cmd = f"ffmpeg -i \"{args.src_video}\" -i \"{args.left_roi}\" -i \"{args.right_roi}\" -filter_complex \""
+    cmd += f"[0:v]scale={out_res[1]}:{out_res[0]}[bg];"
+    cmd += f"[1:v]scale={left_out_res[1]}:{left_out_res[0]}[ol];"
+    cmd += f"[2:v]scale={right_out_res[1]}:{right_out_res[0]}[or];"
+    cmd += f"[bg][ol]overlay={left_out_pos[0]}:{left_out_pos[1]}:format=auto[tmp];"
+    cmd += f"[tmp][or]overlay={right_out_pos[0]}:{right_out_pos[1]}:format=auto[out]"
+    cmd += f"\"  -map \"[out]\" {audio} \"{out_name}-merged{ext}\""
+
+print("left res", left_out_res)
+print("right res", right_out_res)
 print(cmd)
 os.system(cmd)
+print(f"{out_name}-merged{ext}")

@@ -176,5 +176,42 @@ if result_valid:
                 'h': h
             }, f, indent=4)
 
+    lw, lh = result['area']['left'][2] - result['area']['left'][0], result['area']['left'][3] - result['area']['left'][1]
+    rw, rh = result['area']['right'][2] - result['area']['right'][0], result['area']['right'][3] - result['area']['right'][1]
+    total_w = lw + rw
+    total_h = max(lh, rh)
+
+    if lh == rh:
+        filter_complex = "[0:v]format=yuv420p[l];[1:v]format=yuv420p[r];[l][r]hstack=inputs=2[v]"
+    elif lh < rh:
+        filter_complex = (f"[0:v]format=yuv420p,pad={lw}:{total_h}:0:0:black[l];"
+                          f"[1:v]format=yuv420p[r];[l][r]hstack=inputs=2[v]")
+    else:
+        filter_complex = (f"[0:v]format=yuv420p[l];"
+                          f"[1:v]format=yuv420p,pad={rw}:{total_h}:0:0:black[r];[l][r]hstack=inputs=2[v]")
+
+    cmd = (f"ffmpeg -i \"{out_filename}_roi_left{ext}\" -i \"{out_filename}_roi_right{ext}\" "
+           f"-filter_complex \"{filter_complex}\" -map \"[v]\" -c:v libx264 -preset fast -crf 18 -y "
+           f"{out_filename}_roi_sbs{ext}")
+    print(cmd)
+    os.system(cmd)
+
+    with open(f"{out_filename}_roi_left.json") as f:
+        left_source = json.load(f)
+    with open(f"{out_filename}_roi_right.json") as f:
+        right_source = json.load(f)
+
+    with open(f"{out_filename}_roi_sbs.json", 'w') as f:
+        json.dump({
+            'size': {
+                'w': total_w,
+                'h': total_h
+            },
+            'views': {
+                'left': {'x': 0, 'y': 0, 'w': lw, 'h': lh, 'source': left_source},
+                'right': {'x': lw, 'y': 0, 'w': rw, 'h': rh, 'source': right_source}
+            }
+        }, f, indent=4)
+
 else:
     print("invalid result")
