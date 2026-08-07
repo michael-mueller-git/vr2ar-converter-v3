@@ -19,6 +19,6 @@ _, ext = os.path.splitext(args.filepath)
 for name, view in data['views'].items():
     x, y, w, h = view['x'], view['y'], view['w'], view['h']
     output = f"{out_filename}_view_{name}{ext}"
-    cmd = f"ffmpeg -i \"{args.filepath}\" -vf \"crop={w}:{h}:{x}:{y}\" -y {output}"
+    cmd = f"ffmpeg -i \"{args.filepath}\" -vf \"crop={w}:{h}:{x}:{y}\" -y \"{output}\""
     print(cmd)
     os.system(cmd)

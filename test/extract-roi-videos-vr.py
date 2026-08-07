@@ -247,7 +247,7 @@ if result_valid:
                   f"h_fov={proj['h_fov']:.2f}:v_fov={proj['v_fov']:.2f}:w={proj['out_w']}:h={proj['out_h']},"
                   f"format=yuv420p")
         _, ext = os.path.splitext(args.filepath)
-        cmd = f"ffmpeg -i \"{args.filepath}\" -vf \"{vf}\" -y {out_filename}_roi_{x}{ext}"
+        cmd = f"ffmpeg -i \"{args.filepath}\" -vf \"{vf}\" -y \"{out_filename}_roi_{x}{ext}\""
         print(cmd)
         os.system(cmd)
         with open(f"{out_filename}_roi_{x}.json",'w') as f:
@@ -275,7 +275,7 @@ if result_valid:
 
     cmd = (f"ffmpeg -i \"{out_filename}_roi_left{ext}\" -i \"{out_filename}_roi_right{ext}\" "
            f"-filter_complex \"{filter_complex}\" -map \"[v]\" -c:v libx264 -preset fast -crf 18 -y "
-           f"{out_filename}_roi_sbs{ext}")
+           f"\"{out_filename}_roi_sbs{ext}\"")
     print(cmd)
     os.system(cmd)
 
