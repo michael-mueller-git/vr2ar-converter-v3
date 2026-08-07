@@ -78,8 +78,16 @@ def get_boundary(frame):
 
 parser = argparse.ArgumentParser(description="Extract ROI of AR Video")
 parser.add_argument("filepath", type=str, help="ar video file path")
-parser.add_argument("--border", type=int, default=5, help="border value (default: 5)")
+parser.add_argument("--border", type=int, nargs="*", default=[5], metavar="N", help="border px: 1 value for all sides, or 4 for LEFT TOP RIGHT BOTTOM (default: 5)")
 args = parser.parse_args()
+
+b = args.border
+if len(b) == 1:
+    bl = bt = br = bb = b[0]
+elif len(b) == 4:
+    bl, bt, br, bb = b
+else:
+    parser.error("--border requires 1 or 4 values (left top right bottom)")
 
 def is_image_input():
     return args.filepath.endswith(".jpg") or args.filepath.endswith(".png")
@@ -152,10 +160,10 @@ result['area']['right'][2] += (result['size']['w'] // 2)
 
 # apply custom border
 for x in result['area']:
-    result['area'][x][0] = max((result['area'][x][0] - args.border, 0))
-    result['area'][x][1] = max((result['area'][x][1] - args.border, 0))
-    result['area'][x][2] = min((result['area'][x][2] + args.border, result['size']['w']))
-    result['area'][x][3] = min((result['area'][x][3] + args.border, result['size']['h']))
+    result['area'][x][0] = max((result['area'][x][0] - bl, 0))
+    result['area'][x][1] = max((result['area'][x][1] - bt, 0))
+    result['area'][x][2] = min((result['area'][x][2] + br, result['size']['w']))
+    result['area'][x][3] = min((result['area'][x][3] + bb, result['size']['h']))
 
 if result_valid:
     print(result)

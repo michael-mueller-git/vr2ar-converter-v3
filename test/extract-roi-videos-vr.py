@@ -79,10 +79,18 @@ def get_boundary(frame):
 
 parser = argparse.ArgumentParser(description="Extract ROI of VR Video as Regular View")
 parser.add_argument("filepath", type=str, help="ar video file path")
-parser.add_argument("--border", type=int, default=5, help="border value (default: 5)")
+parser.add_argument("--border", type=int, nargs="*", default=[5], metavar="N", help="border px: 1 value for all sides, or 4 for LEFT TOP RIGHT BOTTOM (default: 5)")
 parser.add_argument("--source", type=str, choices=["fisheye", "equirect"], required=True, help="source projection of the video")
 parser.add_argument("--fov", type=float, default=180, help="fisheye lens fov in degrees (default: 180)")
 args = parser.parse_args()
+
+b = args.border
+if len(b) == 1:
+    bl = bt = br = bb = b[0]
+elif len(b) == 4:
+    bl, bt, br, bb = b
+else:
+    parser.error("--border requires 1 or 4 values (left top right bottom)")
 
 def compute_projection(x1, y1, x2, y2, half_x, half_w, half_h, frame_w, frame_h):
     rw = x2 - x1
@@ -211,10 +219,10 @@ result['area']['right'][2] += (result['size']['w'] // 2)
 
 # apply custom border
 for x in result['area']:
-    result['area'][x][0] = max((result['area'][x][0] - args.border, 0))
-    result['area'][x][1] = max((result['area'][x][1] - args.border, 0))
-    result['area'][x][2] = min((result['area'][x][2] + args.border, result['size']['w']))
-    result['area'][x][3] = min((result['area'][x][3] + args.border, result['size']['h']))
+    result['area'][x][0] = max((result['area'][x][0] - bl, 0))
+    result['area'][x][1] = max((result['area'][x][1] - bt, 0))
+    result['area'][x][2] = min((result['area'][x][2] + br, result['size']['w']))
+    result['area'][x][3] = min((result['area'][x][3] + bb, result['size']['h']))
 
 if result_valid:
     print(result)
