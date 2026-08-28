@@ -4,35 +4,34 @@ import json
 import argparse
 import math
 import numpy as np
-from PIL import Image
 
 CONTROL_MASK = cv2.imread("mask.png", cv2.IMREAD_GRAYSCALE)
 
-def get_boundary(frame):
-    h, w = frame.shape[:2]
-    scaled_w, scaled_h = int(w * 0.4), int(h * 0.4)
+def get_boundary(small, mask_analysis, ow, oh):
+    ah, aw = small.shape[:2]
+    scaled_w, scaled_h = int(aw * 0.4), int(ah * 0.4)
 
     overlay_positions = {
-        'left_top': (w // 2 - int(0.4 * w / 2) // 2, h - int(0.4 * h / 2)),
-        'left_bottom': (w // 2 - int(0.4 * w / 2) // 2, 0),
-        'right_top_left': (w - int(0.4 * w / 4), h - int(0.4 * h / 2)),
-        'right_bottom_left': (w - int(0.4 * w / 4), 0),
-        'right_top_right': (0, h - int(0.4 * h / 2)),
+        'left_top': (aw // 2 - int(0.4 * aw / 2) // 2, ah - int(0.4 * ah / 2)),
+        'left_bottom': (aw // 2 - int(0.4 * aw / 2) // 2, 0),
+        'right_top_left': (aw - int(0.4 * aw / 4), ah - int(0.4 * ah / 2)),
+        'right_bottom_left': (aw - int(0.4 * aw / 4), 0),
+        'right_top_right': (0, ah - int(0.4 * ah / 2)),
         'right_bottom_right': (0, 0)
     }
 
     def extract_region(frame, pos, a):
-        size=(scaled_w//(2*a), scaled_h//2)
+        size = (scaled_w // (2 * a), scaled_h // 2)
         x, y = pos
         w, h = size
-        return frame[y:y+h, x:x+w]
+        return frame[y:y + h, x:x + w]
 
-    left_top = extract_region(frame, overlay_positions['left_top'], 1)
-    left_bottom = extract_region(frame, overlay_positions['left_bottom'], 1)
-    right_top_left = extract_region(frame, overlay_positions['right_top_left'], 2)
-    right_bottom_left = extract_region(frame, overlay_positions['right_bottom_left'], 2)
-    right_top_right = extract_region(frame, overlay_positions['right_top_right'], 2)
-    right_bottom_right = extract_region(frame, overlay_positions['right_bottom_right'], 2)
+    left_top = extract_region(small, overlay_positions['left_top'], 1)
+    left_bottom = extract_region(small, overlay_positions['left_bottom'], 1)
+    right_top_left = extract_region(small, overlay_positions['right_top_left'], 2)
+    right_bottom_left = extract_region(small, overlay_positions['right_bottom_left'], 2)
+    right_top_right = extract_region(small, overlay_positions['right_top_right'], 2)
+    right_bottom_right = extract_region(small, overlay_positions['right_bottom_right'], 2)
 
     left_half = np.vstack((left_top, left_bottom))
     right_top = np.hstack((right_top_left, right_top_right))
@@ -40,41 +39,35 @@ def get_boundary(frame):
     right_half = np.vstack((right_top, right_bottom))
 
     full_scaled_mask = np.hstack((left_half, right_half))
+    mask_full = cv2.resize(full_scaled_mask, (aw, ah), interpolation=cv2.INTER_LINEAR)
 
-    original_mask = cv2.resize(full_scaled_mask, (w, h), interpolation=cv2.INTER_LINEAR)
-    original_mask = Image.fromarray(original_mask)
-    binary_mask = original_mask.convert("1")  # Pure black and white mask
-    binary_mask = np.array(binary_mask, dtype=np.uint8) * 255
-    control_mask = cv2.resize(CONTROL_MASK, (binary_mask.shape[1], binary_mask.shape[0]))
+    # detect bright/colored overlay pixels (works for white and red markers)
+    b, g, r = cv2.split(mask_full)
+    bright = np.maximum(np.maximum(b, g), r) >= 128
+    out = np.zeros_like(mask_analysis)
+    out[bright & (mask_analysis == 255)] = 255
 
-    white1 = binary_mask == 255
-    white2 = control_mask == 255
-    out = np.zeros_like(binary_mask, dtype=np.uint8)
-    out[white1 & white2] = 255
+    k = max(2, int(5 * aw / ow + 0.5))
+    kernel = np.ones((k, k), np.uint8)
+    out_clean = cv2.morphologyEx(out, cv2.MORPH_OPEN, kernel)
 
-    _, out_bin = cv2.threshold(out, 127, 255, cv2.THRESH_BINARY)
-    kernel = np.ones((5,5), np.uint8)
+    mid = aw // 2
 
-    # removes small white artifacts
-    out_clean = cv2.morphologyEx(out_bin, cv2.MORPH_OPEN, kernel)
-
-    height, width = out_clean.shape[:2]
-    mid = width // 2
-
-    def get_rectangle(out_clean):
-        contours, _ = cv2.findContours(out_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def get_rectangle(part):
+        contours, _ = cv2.findContours(part, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if contours:
             c = np.vstack(contours)
             x, y, w, h = cv2.boundingRect(c)
-            return [x,y,x+w,y+h]
+            x0 = x * ow // aw
+            y0 = y * oh // ah
+            x1 = (x + w) * ow // aw + (1 if (x + w) * ow % aw else 0)
+            y1 = (y + h) * oh // ah + (1 if (y + h) * oh % ah else 0)
+            return [x0, y0, x1, y1]
         return None
 
-    out_clean_left = out_clean[:, :mid]
-    out_clean_right = out_clean[:, mid:]
-
     return {
-        'left': get_rectangle(out_clean_left),
-        'right': get_rectangle(out_clean_right)
+        'left': get_rectangle(out_clean[:, :mid]),
+        'right': get_rectangle(out_clean[:, mid:])
     }
 
 parser = argparse.ArgumentParser(description="Extract ROI of VR Video as Regular View")
@@ -82,6 +75,8 @@ parser.add_argument("filepath", type=str, help="ar video file path")
 parser.add_argument("--border", type=int, nargs="*", default=[5], metavar="N", help="border px: 1 value for all sides, or 4 for LEFT TOP RIGHT BOTTOM (default: 5)")
 parser.add_argument("--source", type=str, choices=["fisheye", "equirect"], required=True, help="source projection of the video")
 parser.add_argument("--fov", type=float, default=180, help="fisheye lens fov in degrees (default: 180)")
+parser.add_argument("--downscale", type=int, default=0, help="analysis downscale factor (default: auto: 2, or 4 for very large videos)")
+parser.add_argument("--step", type=int, default=1, help="process every Nth frame (default: 1 = all frames)")
 args = parser.parse_args()
 
 b = args.border
@@ -91,6 +86,11 @@ elif len(b) == 4:
     bl, bt, br, bb = b
 else:
     parser.error("--border requires 1 or 4 values (left top right bottom)")
+
+def choose_scale(w):
+    if args.downscale:
+        return args.downscale
+    return 4 if w >= 6144 else 2
 
 def compute_projection(x1, y1, x2, y2, half_x, half_w, half_h, frame_w, frame_h):
     rw = x2 - x1
@@ -165,7 +165,11 @@ if is_image_input():
             'h': h
         }
     }
-    area = get_boundary(frame)
+    scale = choose_scale(w)
+    aw, ah = max(1, w // scale), max(1, h // scale)
+    mask_analysis = cv2.resize(CONTROL_MASK, (aw, ah))
+    small = cv2.resize(frame, (aw, ah), interpolation=cv2.INTER_AREA)
+    area = get_boundary(small, mask_analysis, w, h)
     print(area)
     for x in result['area']:
         if area[x] is not None:
@@ -180,8 +184,14 @@ else:
     i = 0
     while True:
         ret, frame = cap.read()
-        if i == 0:
+        if not ret:
+            break
+        i += 1
+        if i == 1:
             h, w = frame.shape[:2]
+            scale = choose_scale(w)
+            aw, ah = max(1, w // scale), max(1, h // scale)
+            mask_analysis = cv2.resize(CONTROL_MASK, (aw, ah))
             result = {
                 'area': {
                     'left': [w//2, h, 0, 0],
@@ -192,13 +202,12 @@ else:
                     'h': h
                 }
             }
-        i += 1
-        
-        if not ret:
-            break
-            
+        if args.step > 1 and (i - 1) % args.step != 0:
+            continue
+
         print("scan frame", i, "/", total_frames)
-        area = get_boundary(frame)
+        small = cv2.resize(frame, (aw, ah), interpolation=cv2.INTER_AREA)
+        area = get_boundary(small, mask_analysis, w, h)
         for x in result['area']:
             if area[x] is not None:
                 result['area'][x][0] = min((result['area'][x][0], area[x][0]))
